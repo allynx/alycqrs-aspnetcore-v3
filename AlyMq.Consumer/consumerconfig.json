@@ -1,0 +1,16 @@
+{
+  "ConsumerConfig": {
+    "Key": "17a6fff9-add1-665f-960f-d7ca1b9729ef",
+    "Name": "DefaultConsumer",
+    "Address": {
+      "Ip": "127.0.0.1",
+      "Port": 4041,
+      "Backlog": 200
+    },
+    "AdapterAddress": {
+      "Ip": "127.0.0.1",
+      "Port": 5051,
+      "Backlog": 200
+    }
+  }
+}
