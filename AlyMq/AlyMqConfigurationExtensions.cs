@@ -35,9 +35,9 @@ namespace AlyMq
 
             #endregion
 
-            services.AddLogging(configure => configure.AddSerilog(serilogConfig.CreateLogger()));
+           return services.AddLogging(configure => configure.AddSerilog(serilogConfig.CreateLogger()));
 
-            return services.AddTransient<TopicComparer>();
+            //return services.AddTransient<TopicComparer>();
         }
     }
 }

@@ -265,54 +265,54 @@ namespace AlyMq.Consumer
             Timer timer = new Timer(1000 * 10);
             timer.Elapsed += (s, e) =>
             {
-                if (_adapter != null && !_adapter.SafeHandle.IsClosed)
-                {
-                    byte[] reportBuffer = Encoding.UTF8.GetBytes("Consumer report message...");
-                    using (var msBuffer = new MemoryStream())
-                    {
-                        msBuffer.Write(BitConverter.GetBytes(reportBuffer.Length));
-                        msBuffer.Write(reportBuffer);
+                //if (_adapter != null && !_adapter.SafeHandle.IsClosed)
+                //{
+                //    byte[] reportBuffer = Encoding.UTF8.GetBytes("Consumer report message...");
+                //    using (var msBuffer = new MemoryStream())
+                //    {
+                //        msBuffer.Write(BitConverter.GetBytes(reportBuffer.Length));
+                //        msBuffer.Write(reportBuffer);
 
-                        byte[] reportMsgBuffer = msBuffer.GetBuffer();
+                //        byte[] reportMsgBuffer = msBuffer.GetBuffer();
 
-                        SocketAsyncEventArgs reportArgs = new SocketAsyncEventArgs();
-                        reportArgs.SetBuffer(reportMsgBuffer, 0, reportMsgBuffer.Length);
+                //        SocketAsyncEventArgs reportArgs = new SocketAsyncEventArgs();
+                //        reportArgs.SetBuffer(reportMsgBuffer, 0, reportMsgBuffer.Length);
 
-                        try
-                        {
-                            if (_adapter.SendAsync(reportArgs)) { reportArgs.Dispose(); }
-                        }
-                        catch (NotSupportedException nse) { throw nse; }
-                        catch (ObjectDisposedException oe) { throw oe; }
-                        catch (SocketException se) { throw se; }
-                        catch (Exception ex) { throw ex; }
-                    }
-                }
+                //        try
+                //        {
+                //            if (_adapter.SendAsync(reportArgs)) { reportArgs.Dispose(); }
+                //        }
+                //        catch (NotSupportedException nse) { throw nse; }
+                //        catch (ObjectDisposedException oe) { throw oe; }
+                //        catch (SocketException se) { throw se; }
+                //        catch (Exception ex) { throw ex; }
+                //    }
+                //}
 
-                byte[] replyBuffer = Encoding.UTF8.GetBytes("Consumer reply message...");
+                //byte[] replyBuffer = Encoding.UTF8.GetBytes("Consumer reply message...");
 
-                foreach (Socket client in _clients)
-                {
-                    using (var msBuffer = new MemoryStream())
-                    {
-                        msBuffer.Write(BitConverter.GetBytes(replyBuffer.Length));
-                        msBuffer.Write(replyBuffer);
+                //foreach (Socket client in _clients)
+                //{
+                //    using (var msBuffer = new MemoryStream())
+                //    {
+                //        msBuffer.Write(BitConverter.GetBytes(replyBuffer.Length));
+                //        msBuffer.Write(replyBuffer);
 
-                        byte[] replyMsgBuffer = msBuffer.GetBuffer();
+                //        byte[] replyMsgBuffer = msBuffer.GetBuffer();
 
-                        SocketAsyncEventArgs replyArgs = new SocketAsyncEventArgs();
-                        replyArgs.SetBuffer(replyMsgBuffer, 0, replyBuffer.Length);
+                //        SocketAsyncEventArgs replyArgs = new SocketAsyncEventArgs();
+                //        replyArgs.SetBuffer(replyMsgBuffer, 0, replyBuffer.Length);
 
-                        try
-                        {
-                            if (client.SendAsync(replyArgs)) { replyArgs.Dispose(); };
-                        }
-                        catch (NotSupportedException nse) { throw nse; }
-                        catch (ObjectDisposedException oe) { throw oe; }
-                        catch (SocketException se) { throw se; }
-                        catch (Exception ex) { throw ex; }
-                    }
-                }
+                //        try
+                //        {
+                //            if (client.SendAsync(replyArgs)) { replyArgs.Dispose(); };
+                //        }
+                //        catch (NotSupportedException nse) { throw nse; }
+                //        catch (ObjectDisposedException oe) { throw oe; }
+                //        catch (SocketException se) { throw se; }
+                //        catch (Exception ex) { throw ex; }
+                //    }
+                //}
             };
             timer.Enabled = true;
         }

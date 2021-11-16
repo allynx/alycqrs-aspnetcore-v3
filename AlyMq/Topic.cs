@@ -17,5 +17,25 @@ namespace AlyMq
         public string Tag { get; set; }
 
         public DateTime CreateOn { get; set; } = DateTime.Now;
-    }
+
+        public override bool Equals(object obj)
+        {
+            var other = obj as Topic;
+            return obj == this ||
+                other.Key == Key &&
+                other.Name == Name &&
+                other.Tag == Tag &&
+                other.BrokerKey == BrokerKey &&
+                other.CreateOn == CreateOn;
+        }
+
+        public override int GetHashCode()
+        {
+            return Key.GetHashCode() ^
+                BrokerKey.GetHashCode() ^
+                Name.GetHashCode() ^
+                Tag.GetHashCode() ^
+                CreateOn.GetHashCode();
+        }
+     }
 }

@@ -21,9 +21,9 @@ namespace AlyMq.Broker
     {
         private Socket _adapter;
         private Socket _broker;
-        private BrokerInfo _brokerInfo;
-        private HashSet<Topic> _topics;
-        private HashSet<Queue> _queues;
+        private readonly BrokerInfo _brokerInfo;
+        private readonly HashSet<Topic> _topics;
+        private readonly HashSet<Queue> _queues;
         private readonly HashSet<Socket> _clients;
         private readonly ILogger<DefaultBrokerService> _logger;
 
@@ -51,7 +51,7 @@ namespace AlyMq.Broker
             InitDefaultTopicAndQueue();
             BrokerListen();
             AdapterConnect();
-            TestSendTimer();
+            BrokerReportTimer();
         }
 
         private void BrokerListen()
@@ -240,6 +240,22 @@ namespace AlyMq.Broker
             }
         }
 
+        private void SendCallback(dynamic socket, SocketAsyncEventArgs args)
+        {
+            if (args.SocketError == SocketError.Success)
+            {
+                _logger.LogInformation($"Send to [{socket.RemoteEndPoint}] is success ...");
+            }
+            else
+            {
+                _logger.LogInformation($"Send to remote server is failed ...");
+
+                socket.Dispose();
+                socket.Close();
+                args.Dispose();
+            }
+        }
+
 
         private void ApartMessage(Socket socket, MemoryStream ms, int offset)
         {
@@ -300,61 +316,84 @@ namespace AlyMq.Broker
 
         #endregion
 
-        private void TestSendTimer()
+        private void BrokerReportTimer()
         {
-            Timer timer = new Timer(1000 * 10);
+            Timer timer = new Timer(1000 * 30);
             timer.Elapsed += (s, e) =>
             {
-                if (_adapter != null && !_adapter.SafeHandle.IsClosed)
-                {
-                    byte[] reportBuffer = Encoding.UTF8.GetBytes("Broker report message...");
-                    using (var msBuffer = new MemoryStream())
-                    {
-                        msBuffer.Write(BitConverter.GetBytes(reportBuffer.Length));
-                        msBuffer.Write(reportBuffer);
+                //timer.Enabled = false;
+                BrokerReport();
 
-                        byte[] reportMsgBuffer = msBuffer.GetBuffer();
-
-                        SocketAsyncEventArgs reportArgs = new SocketAsyncEventArgs();
-                        reportArgs.SetBuffer(reportMsgBuffer, 0, reportMsgBuffer.Length);
-
-                        try
-                        {
-                            if (_adapter.SendAsync(reportArgs)) { reportArgs.Dispose(); }
-                        }
-                        catch (NotSupportedException nse) { throw nse; }
-                        catch (ObjectDisposedException oe) { throw oe; }
-                        catch (SocketException se) { throw se; }
-                        catch (Exception ex) { throw ex; }
-                    }
-                }
-
-                byte[] replyBuffer = Encoding.UTF8.GetBytes("Broker reply message...");
-
-                foreach (Socket client in _clients)
-                {
-                    using (var msBuffer = new MemoryStream())
-                    {
-                        msBuffer.Write(BitConverter.GetBytes(replyBuffer.Length));
-                        msBuffer.Write(replyBuffer);
-
-                        byte[] replyMsgBuffer = msBuffer.GetBuffer();
-
-                        SocketAsyncEventArgs replyArgs = new SocketAsyncEventArgs();
-                        replyArgs.SetBuffer(replyMsgBuffer, 0, replyBuffer.Length);
-
-                        try
-                        {
-                            if (client.SendAsync(replyArgs)) { replyArgs.Dispose(); };
-                        }
-                        catch (NotSupportedException nse) { throw nse; }
-                        catch (ObjectDisposedException oe) { throw oe; }
-                        catch (SocketException se) { throw se; }
-                        catch (Exception ex) { throw ex; }
-                    }
-                }
             };
             timer.Enabled = true; 
+        }
+
+        private void BrokerReport() {
+
+            if (_adapter != null && !_adapter.SafeHandle.IsClosed)
+            {
+                //byte[] reportBuffer = Encoding.UTF8.GetBytes("Broker report message...");
+
+                //using (var msBuffer = new MemoryStream())
+                //{
+                //    msBuffer.Write(BitConverter.GetBytes(reportBuffer.Length));
+                //    msBuffer.Write(reportBuffer);
+
+                //    byte[] reportMsgBuffer = msBuffer.GetBuffer();
+
+                //    SocketAsyncEventArgs reportArgs = new SocketAsyncEventArgs();
+                //    reportArgs.SetBuffer(reportMsgBuffer, 0, reportMsgBuffer.Length);
+
+                //    try
+                //    {
+                //        if (_adapter.SendAsync(reportArgs)) { reportArgs.Dispose(); }
+                //    }
+                //    catch (NotSupportedException nse) { throw nse; }
+                //    catch (ObjectDisposedException oe) { throw oe; }
+                //    catch (SocketException se) { throw se; }
+                //    catch (Exception ex) { throw ex; }
+                //}
+
+
+                using (var msBuffer = new MemoryStream())
+                {
+                    using (var msBroker = new MemoryStream())
+                    {
+                        using (var msTopic = new MemoryStream())
+                        {
+                            IFormatter iFormatter = new BinaryFormatter();
+
+                            _brokerInfo.PulseOn = DateTime.Now;
+
+                            iFormatter.Serialize(msBroker, _brokerInfo);
+                            byte[] brokerBuffer = msBroker.GetBuffer();
+
+                            iFormatter.Serialize(msTopic, _topics);
+                            byte[] topicBuffer = msTopic.GetBuffer();
+
+                            msBuffer.Write(BitConverter.GetBytes(Instruct.ReportBrokerTopics));
+                            msBuffer.Write(BitConverter.GetBytes(brokerBuffer.Length));
+                            msBuffer.Write(BitConverter.GetBytes(topicBuffer.Length));
+                            msBuffer.Write(brokerBuffer);
+                            msBuffer.Write(topicBuffer);
+
+                            byte[] buffer = msBuffer.GetBuffer();
+                            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+                            args.SetBuffer(buffer, 0, buffer.Length);
+
+                            try
+                            {
+                                if (_adapter.SendAsync(args)) { SendCallback(_adapter, args); }
+                            }
+                            catch (ArgumentException ae) { throw ae; }
+                            catch (ObjectDisposedException ode) { throw ode; }
+                            catch (InvalidOperationException ioe) { throw ioe; }
+                            catch (NotSupportedException nse) { throw nse; }
+                            catch (SocketException se) { throw se; }
+                        }
+                    }
+                }
+            }
         }
     }
 }

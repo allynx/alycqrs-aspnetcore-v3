@@ -13,18 +13,23 @@ using System.Threading.Tasks;
 using System.Timers;
 using System.Text;
 using System.Security;
+using AlyMq.Broker;
 
 namespace AlyMq.Adapter
 {
     public class DefaultAdapterService : IAdapterService
     {
         private Socket _adapter;
+        private readonly HashSet<Topic> _topics;
+        private readonly HashSet<BrokerInfo> _brokers;
         private readonly HashSet<Socket> _clients;
         private readonly ILogger<DefaultAdapterService> _logger;
 
         public DefaultAdapterService(ILogger<DefaultAdapterService> logger)
         {
             _logger = logger;
+            _topics = new HashSet<Topic>();
+            _brokers = new HashSet<BrokerInfo>();
             _clients = new HashSet<Socket>();
         }
 
@@ -149,7 +154,6 @@ namespace AlyMq.Adapter
                     _logger.LogInformation($"Client [{socket.RemoteEndPoint}] is received ...");
 
                     ApartMessage(socket, ms, 0);
-
                     ms.Seek(0, SeekOrigin.Begin);
                     ms.SetLength(0);
                 }
@@ -182,15 +186,56 @@ namespace AlyMq.Adapter
             {
                 ms.Seek(offset, SeekOrigin.Begin);
 
-                byte[] lengthBuffer = new byte[4];
-                ms.Read(lengthBuffer, 0, 4);
-                int length = BitConverter.ToInt32(lengthBuffer);
+                byte[] instructBuffer = new byte[4];
+                ms.Read(instructBuffer, 0, 4);
+                int instruct = BitConverter.ToInt32(instructBuffer);
 
-                byte[] strBuffer = new byte[length];
-                ms.Read(strBuffer, 0, length);
-
-                _logger.LogInformation($"Adapter received message [{Encoding.UTF8.GetString(strBuffer)}]");
+                switch (instruct) {
+                    case Instruct.ReportBrokerTopics:
+                        ApartReportBrokerTopics(socket, ms);
+                        break;
+                    default:
+                        break;
+                }
             }
+        }
+
+        private void ApartReportBrokerTopics(Socket socket, MemoryStream memoryStream)
+        {
+            byte[] brokerLengthBuffer = new byte[4];
+            memoryStream.Read(brokerLengthBuffer, 0, 4);
+            int brokerBufferLength = BitConverter.ToInt32(brokerLengthBuffer);
+
+            byte[] topicLengthBuffer = new byte[4];
+            memoryStream.Read(topicLengthBuffer, 0, 4);
+            int topicBufferLength = BitConverter.ToInt32(topicLengthBuffer);
+
+            byte[] brokerBuffer = new byte[brokerBufferLength];
+            memoryStream.Read(brokerBuffer, 0, brokerBufferLength);
+
+            byte[] topicBuffer = new byte[topicBufferLength];
+            memoryStream.Read(topicBuffer, 0, topicBufferLength);
+
+            using (MemoryStream msBroker = new MemoryStream(brokerBuffer))
+            {
+                using (MemoryStream msTopic = new MemoryStream(topicBuffer))
+                {
+                    IFormatter iFormatter = new BinaryFormatter();
+
+                    BrokerInfo brokerInfo = iFormatter.Deserialize(msBroker) as BrokerInfo;
+
+                    HashSet<Topic> topics = iFormatter.Deserialize(msTopic) as HashSet<Topic>;
+
+                    _brokers.Add(brokerInfo);
+                    _topics.UnionWith(topics);
+
+                    _logger.LogInformation($"Broker [{brokerInfo.Name} -> {brokerInfo.Ip}:{brokerInfo.Port}] is reported ...");
+                }
+            }
+
+            int offset = brokerBufferLength + topicBufferLength + 12;//12 = Instruct length byte + BrokerInfo length byte + Topics length byte
+
+            ApartMessage(socket, memoryStream, offset);
         }
 
         #endregion

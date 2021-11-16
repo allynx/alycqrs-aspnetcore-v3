@@ -23,6 +23,27 @@ namespace AlyMq.Broker
 
         public DateTime PulseOn { get; set; }
 
-        public HashSet<Topic> Topics { get; set; }
+        public override bool Equals(object obj)
+        {
+            var other = obj as BrokerInfo;
+            PulseOn = other.PulseOn;
+            return obj == this ||
+                other.Key == Key &&
+                other.Name == Name &&
+                other.Ip == Ip &&
+                other.Port == Port &&
+                other.Backlog == Backlog &&
+                other.CreateOn == CreateOn ;
+        }
+
+        public override int GetHashCode()
+        {
+            return Key.GetHashCode() ^
+                Name.GetHashCode() ^
+                Ip.GetHashCode() ^
+                Port.GetHashCode() ^
+                Backlog.GetHashCode() ^
+                CreateOn.GetHashCode();
+        }
     }
 }
