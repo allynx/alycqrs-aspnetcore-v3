@@ -10,19 +10,8 @@ namespace AlyMq
     [Serializable]
     public struct Instruct 
     {
-        /// <summary>
-        ///A value indicates report topics and broker relationship.
-        /// </summary>
         public const int ReportBrokerTopics = 1;
-
-        /// <summary>
-        /// A value indicates pull topics and broker relationship.
-        /// </summary>
-        public const int PullBrokerTopics = 2;
-
-        /// <summary>
-        /// A value indicates push topics and broker relationship.
-        /// </summary>
-        public const int PushBrokerTopics = 3;
+        public const int PullBrokerByTopicKeys = 2;
+        public const int PushBrokerFromAdapter = 3;
     }
 }

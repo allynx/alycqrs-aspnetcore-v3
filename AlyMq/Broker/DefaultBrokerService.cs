@@ -48,10 +48,10 @@ namespace AlyMq.Broker
 
         private void Startup()
         {
-            InitDefaultTopicAndQueue();
+            InitDefault();
             BrokerListen();
             AdapterConnect();
-            BrokerReportTimer();
+            ReportTopicBrokerTimer();
         }
 
         private void BrokerListen()
@@ -176,10 +176,7 @@ namespace AlyMq.Broker
 
                 if (socket.Available == 0)
                 {
-                    _logger.LogInformation($"Client [{socket.RemoteEndPoint}] is received ...");
-
                     ApartMessage(socket, ms, 0);
-
                     ms.Seek(0, SeekOrigin.Begin);
                     ms.SetLength(0);
                 }
@@ -256,7 +253,6 @@ namespace AlyMq.Broker
             }
         }
 
-
         private void ApartMessage(Socket socket, MemoryStream ms, int offset)
         {
             if (ms.Length > offset)
@@ -274,87 +270,21 @@ namespace AlyMq.Broker
             }
         }
 
-
-        #region IBrokerService methods
-
-        public Task Start()
+        private void ReportTopicBrokerTimer()
         {
-            Startup();
-            return Task.CompletedTask;
-        }
-
-        public Task Stop()
-        {
-            if (_broker != null && !_broker.SafeHandle.IsClosed)
-            {
-                _broker.Dispose();
-                _broker.Close();
-            }
-
-            return Task.CompletedTask;
-        }
-
-        #endregion
-
-        #region Default Broker Info
-
-        private Task InitDefaultTopicAndQueue()
-        {
-            IConfiguration config = new ConfigurationBuilder()
-              .AddJsonFile("brokerconfig.json", true, true)
-              .Build();
-
-            config.Bind("Topics", _topics);
-
-            foreach (Topic t in _topics) {
-                _queues.Add(new Queue { Key = Guid.NewGuid(), TopicKey = t.Key, Name = $"{t.Name}Queue-{DateTime.Now.ToString("yyyyMMddhhmmssmmm")}", Queues = new ConcurrentQueue<Msg>(), CreateOn = DateTime.Now });
-                _queues.Add(new Queue { Key = Guid.NewGuid(), TopicKey = t.Key, Name = $"{t.Name}Queue-{DateTime.Now.ToString("yyyyMMddhhmmssmmm")}", Queues = new ConcurrentQueue<Msg>(), CreateOn = DateTime.Now });
-            }
-
-            return Task.CompletedTask;
-        }
-
-        #endregion
-
-        private void BrokerReportTimer()
-        {
-            Timer timer = new Timer(1000 * 30);
+            Timer timer = new Timer(30000);
             timer.Elapsed += (s, e) =>
             {
                 //timer.Enabled = false;
-                BrokerReport();
-
+                ReportTopicBroker();
             };
             timer.Enabled = true; 
         }
 
-        private void BrokerReport() {
+        private void ReportTopicBroker() {
 
             if (_adapter != null && !_adapter.SafeHandle.IsClosed)
             {
-                //byte[] reportBuffer = Encoding.UTF8.GetBytes("Broker report message...");
-
-                //using (var msBuffer = new MemoryStream())
-                //{
-                //    msBuffer.Write(BitConverter.GetBytes(reportBuffer.Length));
-                //    msBuffer.Write(reportBuffer);
-
-                //    byte[] reportMsgBuffer = msBuffer.GetBuffer();
-
-                //    SocketAsyncEventArgs reportArgs = new SocketAsyncEventArgs();
-                //    reportArgs.SetBuffer(reportMsgBuffer, 0, reportMsgBuffer.Length);
-
-                //    try
-                //    {
-                //        if (_adapter.SendAsync(reportArgs)) { reportArgs.Dispose(); }
-                //    }
-                //    catch (NotSupportedException nse) { throw nse; }
-                //    catch (ObjectDisposedException oe) { throw oe; }
-                //    catch (SocketException se) { throw se; }
-                //    catch (Exception ex) { throw ex; }
-                //}
-
-
                 using (var msBuffer = new MemoryStream())
                 {
                     using (var msBroker = new MemoryStream())
@@ -395,5 +325,39 @@ namespace AlyMq.Broker
                 }
             }
         }
+
+        #region Init broker default
+
+        private void InitDefault()
+        {
+            IConfiguration config = new ConfigurationBuilder()
+              .AddJsonFile("brokerconfig.json", true, true)
+              .Build();
+
+            config.Bind("Topics", _topics);
+        }
+
+        #endregion
+
+        #region IBrokerService methods
+
+        public Task Start()
+        {
+            Startup();
+            return Task.CompletedTask;
+        }
+
+        public Task Stop()
+        {
+            if (_broker != null && !_broker.SafeHandle.IsClosed)
+            {
+                _broker.Dispose();
+                _broker.Close();
+            }
+
+            return Task.CompletedTask;
+        }
+
+        #endregion
     }
 }

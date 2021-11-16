@@ -1,14 +1,19 @@
 ﻿using AlyMq.Consumer.Configuration;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.Serialization;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Security;
 using System.Text;
 using System.Threading.Tasks;
 using System.Timers;
+using System.Linq;
+using AlyMq.Broker;
 
 namespace AlyMq.Consumer
 {
@@ -16,20 +21,25 @@ namespace AlyMq.Consumer
     {
         private Socket _adapter;
         private Socket _consumer;
+        private readonly HashSet<Topic> _topics;
+        private readonly HashSet<BrokerInfo> _borkers;
         private readonly HashSet<Socket> _clients;
         private readonly ILogger<DefaultConsumerService> _logger;
 
         public DefaultConsumerService(ILogger<DefaultConsumerService> logger)
         {
             _logger = logger;
+            _topics = new HashSet<Topic>();
+            _borkers = new HashSet<BrokerInfo>();
             _clients = new HashSet<Socket>();
         }
 
         private void Startup()
         {
+            InitDefault();
             ConsumerListen();
             AdapterConnect();
-            TestSendTimer();
+            PullBrokerTimer();
         }
 
         private void ConsumerListen()
@@ -156,10 +166,7 @@ namespace AlyMq.Consumer
 
                 if (socket.Available == 0)
                 {
-                    _logger.LogInformation($"Client [{socket.RemoteEndPoint}] is received ...");
-
                     ApartMessage(socket, ms, 0);
-
                     ms.Seek(0, SeekOrigin.Begin);
                     ms.SetLength(0);
                 }
@@ -220,6 +227,21 @@ namespace AlyMq.Consumer
             }
         }
 
+        private void SendCallback(dynamic socket, SocketAsyncEventArgs args)
+        {
+            if (args.SocketError == SocketError.Success)
+            {
+                _logger.LogInformation($"Send to [{socket.RemoteEndPoint}] is success ...");
+            }
+            else
+            {
+                _logger.LogInformation($"Send to remote server is failed ...");
+
+                socket.Dispose();
+                socket.Close();
+                args.Dispose();
+            }
+        }
 
         private void ApartMessage(Socket socket, MemoryStream ms, int offset)
         {
@@ -227,17 +249,107 @@ namespace AlyMq.Consumer
             {
                 ms.Seek(offset, SeekOrigin.Begin);
 
-                byte[] lengthBuffer = new byte[4];
-                ms.Read(lengthBuffer, 0, 4);
-                int length = BitConverter.ToInt32(lengthBuffer);
+                byte[] instructBuffer = new byte[4];
+                ms.Read(instructBuffer, 0, 4);
+                int instruct = BitConverter.ToInt32(instructBuffer);
 
-                byte[] strBuffer = new byte[length];
-                ms.Read(strBuffer, 0, length);
-
-                _logger.LogInformation($"Consumer received message [{Encoding.UTF8.GetString(strBuffer)}]");
+                switch (instruct)
+                {
+                    case Instruct.PushBrokerFromAdapter:
+                        ApartPushBrokerFromAdapter(socket, ms);
+                        break;
+                    default:
+                        break;
+                }
             }
         }
 
+        private void ApartPushBrokerFromAdapter(Socket socket, MemoryStream memoryStream)
+        {
+
+            byte[] brokersLengthBuffer = new byte[4];
+            memoryStream.Read(brokersLengthBuffer, 0, 4);
+            int brokersLength = BitConverter.ToInt32(brokersLengthBuffer);
+
+            byte[] brokersBuffer = new byte[brokersLength];
+            memoryStream.Read(brokersBuffer, 0, brokersLength);
+
+            using (MemoryStream msBrokers = new MemoryStream(brokersBuffer))
+            {
+                IFormatter iFormatter = new BinaryFormatter();
+
+                HashSet<BrokerInfo> brokers = iFormatter.Deserialize(msBrokers) as HashSet<BrokerInfo>;
+
+                _borkers.UnionWith(brokers);
+
+                _logger.LogInformation($"Consumer pull brokers by topic keys form adapter [{_adapter.RemoteEndPoint}] is success ...");
+            }
+
+            int offset = brokersLength + 8;//12 = Instruct of byte + brokers length of byte
+
+            ApartMessage(socket, memoryStream, offset);
+        }
+
+        private void PullBrokerTimer()
+        {
+            Timer timer = new Timer(30000);
+            timer.Elapsed += (s, e) =>
+            {
+                PullBroker();
+            };
+            timer.Enabled = true;
+        }
+
+        private void PullBroker()
+        {
+            if (_adapter != null && !_adapter.SafeHandle.IsClosed)
+            {
+                using (var msBuffer = new MemoryStream())
+                {
+                    using (var msTopicKeysBuffer = new MemoryStream())
+                    {
+                        IFormatter iFormatter = new BinaryFormatter();
+
+                        IEnumerable<Guid> topicKeys = _topics.Select(s => s.Key);
+                        iFormatter.Serialize(msTopicKeysBuffer, topicKeys.ToHashSet());
+                        byte[] topicKeysBuffer = msTopicKeysBuffer.GetBuffer();
+
+                        msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokerByTopicKeys));
+                        msBuffer.Write(BitConverter.GetBytes(topicKeysBuffer.Length));
+                        msBuffer.Write(topicKeysBuffer);
+
+                        byte[] buffer = msBuffer.GetBuffer();
+                        SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+                        args.SetBuffer(buffer, 0, buffer.Length);
+
+                        try
+                        {
+                            if (_adapter.SendAsync(args)) { SendCallback(_adapter, args); }
+                            _logger.LogInformation($"Consumer create pull brokers by topic keys form adapter [{_adapter.RemoteEndPoint}] ...");
+                        }
+                        catch (ArgumentException ae) { throw ae; }
+                        catch (ObjectDisposedException ode) { throw ode; }
+                        catch (InvalidOperationException ioe) { throw ioe; }
+                        catch (NotSupportedException nse) { throw nse; }
+                        catch (SocketException se) { throw se; }
+                    }
+                }
+
+            }
+        }
+
+        #region Init broker default
+
+        private void InitDefault()
+        {
+            IConfiguration config = new ConfigurationBuilder()
+              .AddJsonFile("consumerconfig.json", true, true)
+              .Build();
+
+            config.Bind("Topics", _topics);
+        }
+
+        #endregion
 
         #region IConsumerService methods
 
@@ -259,62 +371,5 @@ namespace AlyMq.Consumer
         }
 
         #endregion
-
-        private void TestSendTimer()
-        {
-            Timer timer = new Timer(1000 * 10);
-            timer.Elapsed += (s, e) =>
-            {
-                //if (_adapter != null && !_adapter.SafeHandle.IsClosed)
-                //{
-                //    byte[] reportBuffer = Encoding.UTF8.GetBytes("Consumer report message...");
-                //    using (var msBuffer = new MemoryStream())
-                //    {
-                //        msBuffer.Write(BitConverter.GetBytes(reportBuffer.Length));
-                //        msBuffer.Write(reportBuffer);
-
-                //        byte[] reportMsgBuffer = msBuffer.GetBuffer();
-
-                //        SocketAsyncEventArgs reportArgs = new SocketAsyncEventArgs();
-                //        reportArgs.SetBuffer(reportMsgBuffer, 0, reportMsgBuffer.Length);
-
-                //        try
-                //        {
-                //            if (_adapter.SendAsync(reportArgs)) { reportArgs.Dispose(); }
-                //        }
-                //        catch (NotSupportedException nse) { throw nse; }
-                //        catch (ObjectDisposedException oe) { throw oe; }
-                //        catch (SocketException se) { throw se; }
-                //        catch (Exception ex) { throw ex; }
-                //    }
-                //}
-
-                //byte[] replyBuffer = Encoding.UTF8.GetBytes("Consumer reply message...");
-
-                //foreach (Socket client in _clients)
-                //{
-                //    using (var msBuffer = new MemoryStream())
-                //    {
-                //        msBuffer.Write(BitConverter.GetBytes(replyBuffer.Length));
-                //        msBuffer.Write(replyBuffer);
-
-                //        byte[] replyMsgBuffer = msBuffer.GetBuffer();
-
-                //        SocketAsyncEventArgs replyArgs = new SocketAsyncEventArgs();
-                //        replyArgs.SetBuffer(replyMsgBuffer, 0, replyBuffer.Length);
-
-                //        try
-                //        {
-                //            if (client.SendAsync(replyArgs)) { replyArgs.Dispose(); };
-                //        }
-                //        catch (NotSupportedException nse) { throw nse; }
-                //        catch (ObjectDisposedException oe) { throw oe; }
-                //        catch (SocketException se) { throw se; }
-                //        catch (Exception ex) { throw ex; }
-                //    }
-                //}
-            };
-            timer.Enabled = true;
-        }
     }
 }
