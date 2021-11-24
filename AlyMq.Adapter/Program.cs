@@ -1,4 +1,5 @@
-﻿using AlyMq.Adapter.Configuration;
+﻿using AlyMq.Adapters.Configuration;
+using AlyMq.Adapters;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Serilog;
@@ -7,7 +8,7 @@ using System;
 using System.IO;
 using System.Threading.Tasks;
 
-namespace AlyMq.Adapter
+namespace AlyMq.Adapters
 {
     class Program
     {

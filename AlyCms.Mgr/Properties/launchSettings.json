@@ -5,6 +5,10 @@
     "iis": {
       "applicationUrl": "http://mgr.allyn.com.cn/",
       "sslPort": 0
+    },
+    "iisExpress": {
+      "applicationUrl": "http://localhost:49938/",
+      "sslPort": 0
     }
   },
   "profiles": {
@@ -14,7 +18,8 @@
       "launchBrowser": true,
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
-      }
+      },
+      "jsWebView2Debugging": false
     },
     "AlyCms.Mgr": {
       "commandName": "Project",

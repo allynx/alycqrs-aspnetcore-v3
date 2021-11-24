@@ -5,13 +5,14 @@ using System.Text;
 namespace AlyMq
 {
     /// <summary>
-    /// message instruct enum.
+    /// message instruct struct.
     /// </summary>
     [Serializable]
     public struct Instruct 
     {
-        public const int ReportBrokerTopics = 1;
-        public const int PullBrokerByTopicKeys = 2;
-        public const int PushBrokerFromAdapter = 3;
+        public const int ReportBroker = 1;
+        public const int PullBrokers = 2;
+        public const int ReportProducer = 3;
+        public const int PushConsumerToBroker = 4;
     }
 }

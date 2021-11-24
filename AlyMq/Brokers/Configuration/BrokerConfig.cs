@@ -3,15 +3,16 @@ using System.Collections.Generic;
 using System.Net;
 using System.Text;
 
-namespace AlyMq.Producer.Configuration
+namespace AlyMq.Brokers.Configuration
 {
-    public sealed class ProducerConfig
+    public sealed class BrokerConfig
     {
-        public static ProducerConfig Instance { get; private set; }
 
-        private ProducerConfig() { }
+        public static BrokerConfig Instance { get; private set; }
 
-        public static ProducerConfig Create() { Instance = new ProducerConfig(); return Instance; }
+        private BrokerConfig() { }
+
+        public static BrokerConfig Create() { Instance = new BrokerConfig(); return Instance; }
 
         public Guid Key { get; set; }
 

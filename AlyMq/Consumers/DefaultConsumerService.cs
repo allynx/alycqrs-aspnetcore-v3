@@ -1,4 +1,4 @@
-﻿using AlyMq.Consumer.Configuration;
+﻿using AlyMq.Consumers.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
@@ -13,16 +13,16 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Timers;
 using System.Linq;
-using AlyMq.Broker;
+using AlyMq.Brokers;
 
-namespace AlyMq.Consumer
+namespace AlyMq.Consumers
 {
     public class DefaultConsumerService : IConsumerService
     {
         private Socket _adapter;
         private Socket _consumer;
         private readonly HashSet<Topic> _topics;
-        private readonly HashSet<BrokerInfo> _borkers;
+        private readonly HashSet<Broker> _borkers;
         private readonly HashSet<Socket> _clients;
         private readonly ILogger<DefaultConsumerService> _logger;
 
@@ -30,7 +30,7 @@ namespace AlyMq.Consumer
         {
             _logger = logger;
             _topics = new HashSet<Topic>();
-            _borkers = new HashSet<BrokerInfo>();
+            _borkers = new HashSet<Broker>();
             _clients = new HashSet<Socket>();
         }
 
@@ -255,8 +255,8 @@ namespace AlyMq.Consumer
 
                 switch (instruct)
                 {
-                    case Instruct.PushBrokerFromAdapter:
-                        ApartPushBrokerFromAdapter(socket, ms);
+                    case Instruct.PullBrokers:
+                        ApartPullBrokerFromAdapter(socket, ms);
                         break;
                     default:
                         break;
@@ -264,7 +264,7 @@ namespace AlyMq.Consumer
             }
         }
 
-        private void ApartPushBrokerFromAdapter(Socket socket, MemoryStream memoryStream)
+        private void ApartPullBrokerFromAdapter(Socket socket, MemoryStream memoryStream)
         {
 
             byte[] brokersLengthBuffer = new byte[4];
@@ -278,7 +278,7 @@ namespace AlyMq.Consumer
             {
                 IFormatter iFormatter = new BinaryFormatter();
 
-                HashSet<BrokerInfo> brokers = iFormatter.Deserialize(msBrokers) as HashSet<BrokerInfo>;
+                HashSet<Broker> brokers = iFormatter.Deserialize(msBrokers) as HashSet<Broker>;
 
                 _borkers.UnionWith(brokers);
 
@@ -314,7 +314,7 @@ namespace AlyMq.Consumer
                         iFormatter.Serialize(msTopicKeysBuffer, topicKeys.ToHashSet());
                         byte[] topicKeysBuffer = msTopicKeysBuffer.GetBuffer();
 
-                        msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokerByTopicKeys));
+                        msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokers));
                         msBuffer.Write(BitConverter.GetBytes(topicKeysBuffer.Length));
                         msBuffer.Write(topicKeysBuffer);
 

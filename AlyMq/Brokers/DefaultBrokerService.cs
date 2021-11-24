@@ -1,4 +1,4 @@
-﻿using AlyMq.Broker.Configuration;
+﻿using AlyMq.Brokers.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
@@ -14,14 +14,18 @@ using System.Threading.Tasks;
 using System.Timers;
 using System.Linq;
 using System.Security;
+using AlyMq.Producers;
+using AlyMq.Consumers;
 
-namespace AlyMq.Broker
+namespace AlyMq.Brokers
 {
     public class DefaultBrokerService : IBrokerService
     {
         private Socket _adapter;
-        private Socket _broker;
-        private readonly BrokerInfo _brokerInfo;
+        private Socket _server;
+        private readonly Broker _broker;
+        private readonly HashSet<Producer> _producers;
+        private readonly HashSet<Consumer> _consumers;
         private readonly HashSet<Topic> _topics;
         private readonly HashSet<Queue> _queues;
         private readonly HashSet<Socket> _clients;
@@ -31,7 +35,7 @@ namespace AlyMq.Broker
         {
             _logger = logger;
 
-            _brokerInfo = new BrokerInfo
+            _broker = new Broker
             {
                 Ip = BrokerConfig.Instance.Address.Ip,
                 Key = BrokerConfig.Instance.Key,
@@ -41,6 +45,8 @@ namespace AlyMq.Broker
                 CreateOn = DateTime.Now
             };
 
+            _producers = new HashSet<Producer>();
+            _consumers = new HashSet<Consumer>();
             _topics = new HashSet<Topic>();
             _queues = new HashSet<Queue>();
             _clients = new HashSet<Socket>();
@@ -51,16 +57,17 @@ namespace AlyMq.Broker
             InitDefault();
             BrokerListen();
             AdapterConnect();
-            ReportTopicBrokerTimer();
+            TenSecondsPoller();
+            ThirtySecondsPoller();
         }
 
         private void BrokerListen()
         {
             try
             {
-                _broker = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                _server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(BrokerConfig.Instance.Address.Ip), BrokerConfig.Instance.Address.Port);
-                Listen(_broker, ipEndPoint, BrokerConfig.Instance.Address.Backlog);
+                Listen(_server, ipEndPoint, BrokerConfig.Instance.Address.Backlog);
             }
             catch (ArgumentNullException aue) { throw aue; }
             catch (FormatException fe) { throw fe; }
@@ -82,7 +89,8 @@ namespace AlyMq.Broker
             {
                 socket.Bind(ipEndPoint);
                 socket.Listen(backlog);
-                _logger.LogInformation($"Server is listenting on: [{ipEndPoint}] ...");
+
+                _logger.LogInformation($"Broker is listenting on: [{ipEndPoint}] ...");
 
                 Accept(socket);
 
@@ -99,6 +107,8 @@ namespace AlyMq.Broker
             SocketAsyncEventArgs args = new SocketAsyncEventArgs();
             args.Completed += AcceptCallback;
             Accept(socket, args);
+
+            _logger.LogInformation($"Async accepting is started for broker[{socket.LocalEndPoint}] ...");
         }
 
         private void Accept(Socket socket, SocketAsyncEventArgs args)
@@ -120,7 +130,7 @@ namespace AlyMq.Broker
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Client [{args.AcceptSocket.RemoteEndPoint}] is accepted ...");
+                _logger.LogInformation($"Async accepted client[{args.AcceptSocket.RemoteEndPoint}] ...");
 
                 _clients.Add(args.AcceptSocket);
                 Receive(args.AcceptSocket);
@@ -130,7 +140,7 @@ namespace AlyMq.Broker
             {
                 //When the monitoring service is actively closed, a callback will be triggered here
 
-                _logger.LogInformation($"Service listenting is closed ...");
+                _logger.LogInformation($"Broker listenting is closed ...");
 
                 foreach (Socket client in _clients)
                 {
@@ -152,6 +162,8 @@ namespace AlyMq.Broker
             args.SetBuffer(new byte[8912], 0, 8912);
             args.UserToken = new MemoryStream();
             Receive(socket, args);
+
+            _logger.LogInformation($"Async receiving is started for client[{socket.RemoteEndPoint}] ...");
         }
 
         private void Receive(Socket socket, SocketAsyncEventArgs args)
@@ -204,9 +216,12 @@ namespace AlyMq.Broker
         {
             try
             {
+                byte[] buffer = GetReportBrokerBuffer();
+
                 SocketAsyncEventArgs args = new SocketAsyncEventArgs();
                 args.Completed += ConnectCallback;
                 args.RemoteEndPoint = remoteEndPoint;
+                args.SetBuffer(buffer, 0, buffer.Length);
 
                 if (!socket.ConnectAsync(args)) { ConnectCallback(socket, args); }
             }
@@ -223,14 +238,14 @@ namespace AlyMq.Broker
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Server [{socket.RemoteEndPoint}] is connected ...");
+                _logger.LogInformation($"Broerk is connected to remote server[{socket.RemoteEndPoint}] ...");
 
                 Receive(socket);
             }
             else
             {
-                _logger.LogInformation($"Connect to remote server is failed ...");
-                
+                _logger.LogInformation($"Broker connecting to remote server is failed ...");
+
                 socket.Dispose();
                 socket.Close();
                 args.Dispose();
@@ -259,71 +274,153 @@ namespace AlyMq.Broker
             {
                 ms.Seek(offset, SeekOrigin.Begin);
 
-                byte[] lengthBuffer = new byte[4];
-                ms.Read(lengthBuffer, 0, 4);
-                int length = BitConverter.ToInt32(lengthBuffer);
+                byte[] instructBuffer = new byte[4];
+                ms.Read(instructBuffer, 0, 4);
+                int instruct = BitConverter.ToInt32(instructBuffer);
 
-                byte[] strBuffer = new byte[length];
-                ms.Read(strBuffer, 0, length);
-
-                _logger.LogInformation($"Broker received message [{Encoding.UTF8.GetString(strBuffer)}]");
+                switch (instruct)
+                {
+                    case Instruct.ReportProducer:
+                        ApartReportProducer(socket, ms);
+                        break;
+                    default:
+                        break;
+                }
             }
         }
 
-        private void ReportTopicBrokerTimer()
+        private void ApartReportProducer(Socket socket, MemoryStream memoryStream) {
+            byte[] producerLengthBuffer = new byte[4];
+            memoryStream.Read(producerLengthBuffer, 0, 4);
+            int producerBufferLength = BitConverter.ToInt32(producerLengthBuffer);
+
+            byte[] producerBuffer = new byte[producerBufferLength];
+            memoryStream.Read(producerBuffer, 0, producerBufferLength);
+
+            using (MemoryStream msProducer = new MemoryStream(producerBuffer))
+            {
+                IFormatter iFormatter = new BinaryFormatter();
+
+                Producer producer = iFormatter.Deserialize(msProducer) as Producer;
+
+                _producers.Add(producer);
+
+                _logger.LogInformation($"Producer [{producer.Name} -> {producer.Ip}:{producer.Port}] is reported ...");
+            }
+
+            int offset = producerBufferLength + 8;//8 = Instruct of byte + Producer length of byte
+
+            ApartMessage(socket, memoryStream, offset);
+        }
+
+        private void TenSecondsPoller() {
+            Timer timer = new Timer(10000);
+            timer.Elapsed += (s, e) =>
+            {
+                ProducerInspecter();
+                ConsumerInspecter();
+            };
+            timer.Enabled = true;
+        }
+
+        private void ThirtySecondsPoller()
         {
             Timer timer = new Timer(30000);
             timer.Elapsed += (s, e) =>
             {
                 //timer.Enabled = false;
-                ReportTopicBroker();
+                ReportBroker();
             };
-            timer.Enabled = true; 
+            timer.Enabled = true;
         }
 
-        private void ReportTopicBroker() {
+        private void ProducerInspecter()
+        {
+            _producers.ToList().ForEach(item =>
+            {
+                if (item.PulseOn.AddMinutes(2) < DateTime.Now)
+                {
+                    _producers.Remove(item);
+                    Socket socket = _clients.FirstOrDefault(m => m.RemoteEndPoint.ToString() == $"{item.Ip}:{item.Port}");
+                    if (socket != null)
+                    {
+                        socket.Shutdown(SocketShutdown.Both);
+                        socket.Dispose();
+                        socket.Close();
+                    }
+                }
+            });
+        }
+
+        private void ConsumerInspecter()
+        {
+            _consumers.ToList().ForEach(item =>
+            {
+                if (item.PulseOn.AddMinutes(2) < DateTime.Now)
+                {
+                    _consumers.Remove(item);
+                    Socket socket = _clients.FirstOrDefault(m => m.RemoteEndPoint.ToString() == $"{item.Ip}:{item.Port}");
+                    if (socket != null)
+                    {
+                        socket.Shutdown(SocketShutdown.Both);
+                        socket.Dispose();
+                        socket.Close();
+                    }
+                }
+            });
+        }
+
+        private void ReportBroker() {
 
             if (_adapter != null && !_adapter.SafeHandle.IsClosed)
             {
-                using (var msBuffer = new MemoryStream())
+                SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+                byte[] buffer = GetReportBrokerBuffer();
+                args.SetBuffer(buffer, 0, buffer.Length);
+
+                try
                 {
-                    using (var msBroker = new MemoryStream())
+                    if (_adapter.SendAsync(args)) { SendCallback(_adapter, args); }
+                }
+                catch (ArgumentException ae) { throw ae; }
+                catch (ObjectDisposedException ode) { throw ode; }
+                catch (InvalidOperationException ioe) { throw ioe; }
+                catch (NotSupportedException nse) { throw nse; }
+                catch (SocketException se) { throw se; }
+            }
+        }
+
+        private byte[] GetReportBrokerBuffer()
+        {
+            using (var msBuffer = new MemoryStream())
+            {
+                using (var msBroker = new MemoryStream())
+                {
+                    using (var msTopic = new MemoryStream())
                     {
-                        using (var msTopic = new MemoryStream())
-                        {
-                            IFormatter iFormatter = new BinaryFormatter();
+                        IFormatter iFormatter = new BinaryFormatter();
 
-                            _brokerInfo.PulseOn = DateTime.Now;
+                        _broker.PulseOn = DateTime.Now;
 
-                            iFormatter.Serialize(msBroker, _brokerInfo);
-                            byte[] brokerBuffer = msBroker.GetBuffer();
+                        iFormatter.Serialize(msBroker, _broker);
+                        byte[] brokerBuffer = msBroker.GetBuffer();
 
-                            iFormatter.Serialize(msTopic, _topics);
-                            byte[] topicBuffer = msTopic.GetBuffer();
+                        iFormatter.Serialize(msTopic, _topics);
+                        byte[] topicBuffer = msTopic.GetBuffer();
 
-                            msBuffer.Write(BitConverter.GetBytes(Instruct.ReportBrokerTopics));
-                            msBuffer.Write(BitConverter.GetBytes(brokerBuffer.Length));
-                            msBuffer.Write(BitConverter.GetBytes(topicBuffer.Length));
-                            msBuffer.Write(brokerBuffer);
-                            msBuffer.Write(topicBuffer);
+                        msBuffer.Write(BitConverter.GetBytes(Instruct.ReportBroker));
+                        msBuffer.Write(BitConverter.GetBytes(brokerBuffer.Length));
+                        msBuffer.Write(BitConverter.GetBytes(topicBuffer.Length));
+                        msBuffer.Write(brokerBuffer);
+                        msBuffer.Write(topicBuffer);
 
-                            byte[] buffer = msBuffer.GetBuffer();
-                            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-                            args.SetBuffer(buffer, 0, buffer.Length);
+                        byte[] buffer = msBuffer.GetBuffer();
 
-                            try
-                            {
-                                if (_adapter.SendAsync(args)) { SendCallback(_adapter, args); }
-                            }
-                            catch (ArgumentException ae) { throw ae; }
-                            catch (ObjectDisposedException ode) { throw ode; }
-                            catch (InvalidOperationException ioe) { throw ioe; }
-                            catch (NotSupportedException nse) { throw nse; }
-                            catch (SocketException se) { throw se; }
-                        }
+                        return buffer;
                     }
                 }
             }
+
         }
 
         #region Init broker default
@@ -335,6 +432,8 @@ namespace AlyMq.Broker
               .Build();
 
             config.Bind("Topics", _topics);
+
+            _logger.LogInformation($"Broker initialized ...");
         }
 
         #endregion
@@ -349,10 +448,10 @@ namespace AlyMq.Broker
 
         public Task Stop()
         {
-            if (_broker != null && !_broker.SafeHandle.IsClosed)
+            if (_server != null && !_server.SafeHandle.IsClosed)
             {
-                _broker.Dispose();
-                _broker.Close();
+                _server.Dispose();
+                _server.Close();
             }
 
             return Task.CompletedTask;

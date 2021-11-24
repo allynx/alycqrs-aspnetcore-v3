@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace AlyMq.Broker.Configuration
+namespace AlyMq.Brokers.Configuration
 {
     public static class BrokerConfigurationExtensions
     {

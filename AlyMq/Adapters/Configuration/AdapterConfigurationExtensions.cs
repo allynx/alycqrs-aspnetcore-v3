@@ -5,7 +5,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace AlyMq.Adapter.Configuration
+namespace AlyMq.Adapters.Configuration
 {
     public static class AdapterConfigurationExtensions
     {

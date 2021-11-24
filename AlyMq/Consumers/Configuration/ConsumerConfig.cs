@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace AlyMq.Consumer.Configuration
+namespace AlyMq.Consumers.Configuration
 {
     public sealed class ConsumerConfig
     {

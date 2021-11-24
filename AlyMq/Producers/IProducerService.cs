@@ -3,12 +3,9 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace AlyMq.Adapter
+namespace AlyMq.Producers
 {
-    /// <summary>
-    /// Adapter service.
-    /// </summary>
-    public interface IAdapterService
+    public interface IProducerService
     {
         Task Start();
         Task Stop();

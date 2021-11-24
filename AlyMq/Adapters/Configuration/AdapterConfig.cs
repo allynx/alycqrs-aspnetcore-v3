@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 
-namespace AlyMq.Adapter.Configuration
+namespace AlyMq.Adapters.Configuration
 {
     public sealed class AdapterConfig
     {

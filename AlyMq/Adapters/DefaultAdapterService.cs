@@ -1,5 +1,5 @@
-﻿using AlyMq.Adapter.Configuration;
-using AlyMq.Adapter;
+﻿using AlyMq.Adapters.Configuration;
+using AlyMq.Adapters;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -13,36 +13,37 @@ using System.Threading.Tasks;
 using System.Timers;
 using System.Text;
 using System.Security;
-using AlyMq.Broker;
+using AlyMq.Brokers;
 
-namespace AlyMq.Adapter
+namespace AlyMq.Adapters
 {
     public class DefaultAdapterService : IAdapterService
     {
-        private Socket _adapter;
+        private Socket _server;
         private readonly HashSet<Topic> _topics;
-        private readonly HashSet<BrokerInfo> _brokers;
+        private readonly HashSet<Broker> _brokers;
         private readonly HashSet<Socket> _clients;
         private readonly ILogger<DefaultAdapterService> _logger;
         public DefaultAdapterService(ILogger<DefaultAdapterService> logger)
         {
             _logger = logger;
             _topics = new HashSet<Topic>();
-            _brokers = new HashSet<BrokerInfo>();
+            _brokers = new HashSet<Broker>();
             _clients = new HashSet<Socket>();
         }
         private void Startup()
         {
             AdapterListen();
+            TenSecondsPoller();
         }
 
         private void AdapterListen()
         {
             try
             {
-                _adapter = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                _server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(AdapterConfig.Instance.Address.Ip), AdapterConfig.Instance.Address.Port);
-                Listen(_adapter, ipEndPoint, AdapterConfig.Instance.Address.Backlog);
+                Listen(_server, ipEndPoint, AdapterConfig.Instance.Address.Backlog);
 
             }
             catch (ArgumentNullException aue) { throw aue; }
@@ -55,7 +56,8 @@ namespace AlyMq.Adapter
             {
                 socket.Bind(ipEndPoint);
                 socket.Listen(backlog);
-                _logger.LogInformation($"Server is listenting on: [{ipEndPoint}] ...");
+
+                _logger.LogInformation($"Adapter is listenting on: [{ipEndPoint}] ...");
 
                 Accept(socket);
             }
@@ -70,7 +72,10 @@ namespace AlyMq.Adapter
         {
             SocketAsyncEventArgs args = new SocketAsyncEventArgs();
             args.Completed += AcceptCallback;
+            args.SetBuffer(new byte[8912], 0, 8912);
             Accept(socket, args);
+
+            _logger.LogInformation($"Async accepting is started for adapter[{socket.LocalEndPoint}]...");
         }
 
         private void Accept(Socket socket, SocketAsyncEventArgs args)
@@ -92,7 +97,7 @@ namespace AlyMq.Adapter
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Client [{args.AcceptSocket.RemoteEndPoint}] is accepted ...");
+                _logger.LogInformation($"Async accepted client[{args.AcceptSocket.RemoteEndPoint}] ...");
 
                 _clients.Add(args.AcceptSocket);
                 Receive(args.AcceptSocket);
@@ -103,7 +108,7 @@ namespace AlyMq.Adapter
                 //When the monitoring service is actively closed, a callback will be triggered here
 
                 _logger.LogInformation($"Service listenting is closed ...");
-                
+
                 foreach (Socket client in _clients)
                 {
                     _logger.LogInformation($"Client [{client.RemoteEndPoint}] is closed ...");
@@ -124,6 +129,8 @@ namespace AlyMq.Adapter
             args.SetBuffer(new byte[8912], 0, 8912);
             args.UserToken = new MemoryStream();
             Receive(socket, args);
+
+            _logger.LogInformation($"Async receiving is started for client[{socket.RemoteEndPoint}]...");
         }
 
         private void Receive(Socket socket, SocketAsyncEventArgs args)
@@ -141,7 +148,7 @@ namespace AlyMq.Adapter
 
         private void ReceiveCallback(dynamic socket, SocketAsyncEventArgs args)
         {
-              if (args.SocketError == SocketError.Success && args.BytesTransferred > 0)
+            if (args.SocketError == SocketError.Success && args.BytesTransferred > 0)
             {
                 MemoryStream ms = args.UserToken as MemoryStream;
                 ms.Write(args.Buffer, args.Offset, args.BytesTransferred);
@@ -162,7 +169,7 @@ namespace AlyMq.Adapter
                     _logger.LogInformation($"Client {socket.RemoteEndPoint} is closed ...");
 
                     _clients.Remove(socket);
-                    
+
                     socket.Shutdown(SocketShutdown.Both);
                     socket.Dispose();
                     socket.Close();
@@ -198,12 +205,13 @@ namespace AlyMq.Adapter
                 ms.Read(instructBuffer, 0, 4);
                 int instruct = BitConverter.ToInt32(instructBuffer);
 
-                switch (instruct) {
-                    case Instruct.ReportBrokerTopics:
-                        ApartReportBrokerTopics(socket, ms);
+                switch (instruct)
+                {
+                    case Instruct.ReportBroker:
+                        ApartReportBroker(socket, ms);
                         break;
-                    case Instruct.PullBrokerByTopicKeys:
-                        ApartPullBrokerByTopicKeys(socket, ms);
+                    case Instruct.PullBrokers:
+                        ApartPullBrokers(socket, ms);
                         break;
                     default:
                         break;
@@ -211,7 +219,7 @@ namespace AlyMq.Adapter
             }
         }
 
-        private void ApartReportBrokerTopics(Socket socket, MemoryStream memoryStream)
+        private void ApartReportBroker(Socket socket, MemoryStream memoryStream)
         {
             byte[] brokerLengthBuffer = new byte[4];
             memoryStream.Read(brokerLengthBuffer, 0, 4);
@@ -233,14 +241,14 @@ namespace AlyMq.Adapter
                 {
                     IFormatter iFormatter = new BinaryFormatter();
 
-                    BrokerInfo brokerInfo = iFormatter.Deserialize(msBroker) as BrokerInfo;
+                    Broker brokerInfo = iFormatter.Deserialize(msBroker) as Broker;
 
                     HashSet<Topic> topics = iFormatter.Deserialize(msTopic) as HashSet<Topic>;
 
                     _brokers.Add(brokerInfo);
                     _topics.UnionWith(topics);
 
-                    _logger.LogInformation($"Broker [{brokerInfo.Name} -> {brokerInfo.Ip}:{brokerInfo.Port}] is reported ...");
+                    _logger.LogInformation($"{brokerInfo.Name}->{brokerInfo.Ip}:{brokerInfo.Port} is reported ...");
                 }
             }
 
@@ -249,7 +257,8 @@ namespace AlyMq.Adapter
             ApartMessage(socket, memoryStream, offset);
         }
 
-        private void ApartPullBrokerByTopicKeys(Socket socket, MemoryStream memoryStream) {
+        private void ApartPullBrokers(Socket socket, MemoryStream memoryStream)
+        {
             byte[] topicKeysLengthBuffer = new byte[4];
             memoryStream.Read(topicKeysLengthBuffer, 0, 4);
             int topicKeysLength = BitConverter.ToInt32(topicKeysLengthBuffer);
@@ -265,11 +274,11 @@ namespace AlyMq.Adapter
 
                 IEnumerable<Topic> topics = _topics.Where(m => topicKeys.Contains(m.Key));
 
-                IEnumerable<BrokerInfo> brokers = _brokers.Where(m => topics.Any(t => t.BrokerKey == m.Key));
+                IEnumerable<Broker> brokers = _brokers.Where(m => topics.Any(t => t.BrokerKey == m.Key));
 
                 _logger.LogInformation($"Client [{socket.RemoteEndPoint}] is pull broker by topic keys ...");
 
-                PushBrokers(socket, brokers);
+                ReplyPullBrokers(socket, brokers);
 
                 //_logger.LogInformation($"Client [{socket.RemoteEndPoint}] is pull topic broker ...");
             }
@@ -279,7 +288,8 @@ namespace AlyMq.Adapter
             ApartMessage(socket, memoryStream, offset);
         }
 
-        private void PushBrokers(Socket socket,IEnumerable<BrokerInfo> borkers) {
+        private void ReplyPullBrokers(Socket socket, IEnumerable<Broker> borkers)
+        {
             using (var msBuffer = new MemoryStream())
             {
                 using (var msBroker = new MemoryStream())
@@ -291,7 +301,7 @@ namespace AlyMq.Adapter
                         iFormatter.Serialize(msBroker, borkers.ToHashSet());
                         byte[] brokersBuffer = msBroker.GetBuffer();
 
-                        msBuffer.Write(BitConverter.GetBytes(Instruct.PushBrokerFromAdapter));
+                        msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokers));
                         msBuffer.Write(BitConverter.GetBytes(brokersBuffer.Length));
                         msBuffer.Write(brokersBuffer);
 
@@ -315,6 +325,33 @@ namespace AlyMq.Adapter
             }
         }
 
+        private void TenSecondsPoller()
+        {
+            Timer timer = new Timer(10000);
+            timer.Elapsed += (s, e) =>
+            {
+                BrokerInspecter();
+            };
+            timer.Enabled = true;
+        }
+        private void BrokerInspecter()
+        {
+            _brokers.ToList().ForEach(item =>
+            {
+                if (item.PulseOn.AddMinutes(2) < DateTime.Now)
+                {
+                    _brokers.Remove(item);
+                    Socket socket = _clients.FirstOrDefault(m => m.RemoteEndPoint.ToString() == $"{item.Ip}:{item.Port}");
+                    if (socket != null)
+                    {
+                        socket.Shutdown(SocketShutdown.Both);
+                        socket.Dispose();
+                        socket.Close();
+                    }
+                }
+            });
+        }
+
         #region IAdapterService methods
 
         public Task Start()
@@ -325,10 +362,10 @@ namespace AlyMq.Adapter
 
         public Task Stop()
         {
-            if (_adapter != null && !_adapter.SafeHandle.IsClosed)
+            if (_server != null && !_server.SafeHandle.IsClosed)
             {
-                _adapter.Dispose();
-                _adapter.Close();
+                _server.Dispose();
+                _server.Close();
             }
 
             return Task.CompletedTask;

@@ -1,13 +1,16 @@
-﻿using System;
+﻿using Nancy.Json;
+using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Text;
+using System.Xml.Serialization;
 
 namespace AlyMq
 {
     [Serializable]
     public class Topic
     {
+
         public Guid Key { get; set; }
 
         public Guid BrokerKey { get; set; }
@@ -15,6 +18,8 @@ namespace AlyMq
         public string Name { get; set; }
 
         public string Tag { get; set; }
+
+        public HashSet<Queue> Queues { get; set; } 
 
         public DateTime CreateOn { get; set; } = DateTime.Now;
 

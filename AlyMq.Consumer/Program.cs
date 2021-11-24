@@ -1,9 +1,9 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Threading.Tasks;
-using AlyMq.Consumer.Configuration;
+using AlyMq.Consumers.Configuration;
 
-namespace AlyMq.Consumer
+namespace AlyMq.Consumers
 {
     class Program
     {

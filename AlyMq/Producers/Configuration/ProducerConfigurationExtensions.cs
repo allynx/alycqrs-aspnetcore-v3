@@ -4,7 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 
-namespace AlyMq.Producer.Configuration
+namespace AlyMq.Producers.Configuration
 {
     public static class ProducerConfigurationExtensions
     {

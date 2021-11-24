@@ -1,5 +1,5 @@
-﻿using AlyMq.Producer;
-using AlyMq.Producer.Configuration;
+﻿using AlyMq.Producers;
+using AlyMq.Producers.Configuration;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System;
@@ -14,25 +14,37 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Timers;
 using System.Linq;
-using AlyMq.Broker;
+using AlyMq.Brokers;
 
-namespace AlyMq.Producer
+namespace AlyMq.Producers
 {
     public class DefaultProducerService : IProducerService
     {
         private Socket _adapter;
-        private Socket _producer;
+        private Socket _server;
+        private Producer _producer;
         private readonly HashSet<Topic> _topics;
-        private readonly HashSet<BrokerInfo> _borkers;
-        private readonly HashSet<Socket> _clients;
+        private readonly HashSet<Broker> _borkers;
+        private readonly HashSet<Socket> _acceptSockets;
+        private readonly HashSet<Socket> _brokerSockets;
         private readonly ILogger<DefaultProducerService> _logger;
 
         public DefaultProducerService(ILogger<DefaultProducerService> logger)
         {
             _logger = logger;
+            _producer = new Producer
+            {
+                Ip = ProducerConfig.Instance.Address.Ip,
+                Key = ProducerConfig.Instance.Key,
+                Backlog = ProducerConfig.Instance.Address.Backlog,
+                Name = ProducerConfig.Instance.Name,
+                Port = ProducerConfig.Instance.Address.Port,
+                CreateOn = DateTime.Now
+            };
             _topics = new HashSet<Topic>();
-            _borkers = new HashSet<BrokerInfo>();
-            _clients = new HashSet<Socket>();
+            _borkers = new HashSet<Broker>();
+            _brokerSockets = new HashSet<Socket>();
+            _acceptSockets = new HashSet<Socket>();
         }
 
         private void Startup()
@@ -40,16 +52,16 @@ namespace AlyMq.Producer
             InitDefault();
             ProducerListen();
             AdapterConnect();
-            PullBrokerTimer();
+            ThirtySecondsPoller();
         }
 
         private void ProducerListen()
         {
             try
             {
-                _producer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                _server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(ProducerConfig.Instance.Address.Ip), ProducerConfig.Instance.Address.Port);
-                Listen(_producer, ipEndPoint, ProducerConfig.Instance.Address.Backlog);
+                Listen(_server, ipEndPoint, ProducerConfig.Instance.Address.Backlog);
             }
             catch (ArgumentNullException aue) { throw aue; }
             catch (FormatException fe) { throw fe; }
@@ -62,6 +74,26 @@ namespace AlyMq.Producer
                 _adapter = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
                 IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(ProducerConfig.Instance.AdapterAddress.Ip), ProducerConfig.Instance.AdapterAddress.Port);
                 Connect(_adapter, ipEndPoint);
+            }
+            catch (ArgumentNullException aue) { throw aue; }
+            catch (FormatException fe) { throw fe; }
+        }
+
+        private void BrokerConnect()
+        {
+
+            try
+            {
+                foreach (Broker item in _borkers)
+                {
+                    if (!_brokerSockets.Any(m => m.RemoteEndPoint.ToString() == $"{item.Ip}:{item.Port}"))
+                    {
+                        Socket broker = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                        IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(item.Ip), item.Port);
+                        _brokerSockets.Add(broker);
+                        Connect(broker, ipEndPoint);
+                    }
+                }
             }
             catch (ArgumentNullException aue) { throw aue; }
             catch (FormatException fe) { throw fe; }
@@ -113,7 +145,7 @@ namespace AlyMq.Producer
             {
                 _logger.LogInformation($"Client [{args.AcceptSocket.RemoteEndPoint}] is accepted ...");
 
-                _clients.Add(args.AcceptSocket);
+                _acceptSockets.Add(args.AcceptSocket);
                 Receive(args.AcceptSocket);
                 Accept(socket, args);
             }
@@ -123,7 +155,7 @@ namespace AlyMq.Producer
 
                 _logger.LogInformation($"Service listenting is closed ...");
 
-                foreach (Socket client in _clients)
+                foreach (Socket client in _acceptSockets)
                 {
                     _logger.LogInformation($"Client [{client.RemoteEndPoint}] is closed ...");
 
@@ -131,7 +163,7 @@ namespace AlyMq.Producer
                     client.Dispose();
                     client.Close();
                 }
-                _clients.Clear();
+                _acceptSockets.Clear();
                 args.Dispose();
             }
         }
@@ -180,7 +212,8 @@ namespace AlyMq.Producer
                 {
                     _logger.LogInformation($"Client {socket.RemoteEndPoint} is closed ...");
 
-                    _clients.Remove(socket);
+                    _acceptSockets.Remove(socket);
+                    _brokerSockets.RemoveWhere(m => m.RemoteEndPoint == socket.RemoteEndPoint);
 
                     socket.Shutdown(SocketShutdown.Both);
                     socket.Dispose();
@@ -221,7 +254,7 @@ namespace AlyMq.Producer
             else
             {
                 _logger.LogInformation($"Connect to remote server is failed ...");
-
+                _brokerSockets.RemoveWhere(m => m.RemoteEndPoint == socket.RemoteEndPoint);
                 socket.Dispose();
                 socket.Close();
                 args.Dispose();
@@ -256,8 +289,8 @@ namespace AlyMq.Producer
 
                 switch (instruct)
                 {
-                    case Instruct.PushBrokerFromAdapter:
-                        ApartPushBrokerFromAdapter(socket, ms);
+                    case Instruct.PullBrokers:
+                        ApartPullBrokerFromAdapter(socket, ms);
                         break;
                     default:
                         break;
@@ -265,7 +298,8 @@ namespace AlyMq.Producer
             }
         }
 
-        private void ApartPushBrokerFromAdapter(Socket socket, MemoryStream memoryStream) {
+        private void ApartPullBrokerFromAdapter(Socket socket, MemoryStream memoryStream)
+        {
 
             byte[] brokersLengthBuffer = new byte[4];
             memoryStream.Read(brokersLengthBuffer, 0, 4);
@@ -278,7 +312,7 @@ namespace AlyMq.Producer
             {
                 IFormatter iFormatter = new BinaryFormatter();
 
-                HashSet<BrokerInfo> brokers = iFormatter.Deserialize(msBrokers) as HashSet<BrokerInfo>;
+                HashSet<Broker> brokers = iFormatter.Deserialize(msBrokers) as HashSet<Broker>;
 
                 _borkers.UnionWith(brokers);
 
@@ -290,17 +324,20 @@ namespace AlyMq.Producer
             ApartMessage(socket, memoryStream, offset);
         }
 
-        private void PullBrokerTimer()
+        private void ThirtySecondsPoller()
         {
             Timer timer = new Timer(30000);
             timer.Elapsed += (s, e) =>
             {
-                PullBroker();
+                PullBrokerFromAdapter();
+                BrokerConnect();
+                PushProducerToBroker();
             };
             timer.Enabled = true;
         }
 
-        private void PullBroker() {
+        private void PullBrokerFromAdapter()
+        {
             if (_adapter != null && !_adapter.SafeHandle.IsClosed)
             {
                 using (var msBuffer = new MemoryStream())
@@ -313,7 +350,7 @@ namespace AlyMq.Producer
                         iFormatter.Serialize(msTopicKeysBuffer, topicKeys.ToHashSet());
                         byte[] topicKeysBuffer = msTopicKeysBuffer.GetBuffer();
 
-                        msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokerByTopicKeys));
+                        msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokers));
                         msBuffer.Write(BitConverter.GetBytes(topicKeysBuffer.Length));
                         msBuffer.Write(topicKeysBuffer);
 
@@ -333,11 +370,53 @@ namespace AlyMq.Producer
                         catch (SocketException se) { throw se; }
                     }
                 }
-                
+
             }
         }
 
-        #region Init broker default
+        private void PushProducerToBroker()
+        {
+
+            foreach (Socket broker in _brokerSockets)
+            {
+                if (broker != null && !broker.SafeHandle.IsClosed)
+                {
+                    using (var msBuffer = new MemoryStream())
+                    {
+                        using (var msProducer = new MemoryStream())
+                        {
+                            IFormatter iFormatter = new BinaryFormatter();
+
+                            _producer.PulseOn = DateTime.Now;
+
+                            iFormatter.Serialize(msProducer, _producer);
+                            byte[] producerBuffer = msProducer.GetBuffer();
+
+                            msBuffer.Write(BitConverter.GetBytes(Instruct.ReportProducer));
+                            msBuffer.Write(BitConverter.GetBytes(producerBuffer.Length));
+                            msBuffer.Write(producerBuffer);
+
+                            byte[] buffer = msBuffer.GetBuffer();
+                            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+                            args.SetBuffer(buffer, 0, buffer.Length);
+
+                            try
+                            {
+                                if (broker.SendAsync(args)) { SendCallback(broker, args); }
+                                _logger.LogInformation($"Producer push heartbeat to borker [{broker.RemoteEndPoint}] ...");
+                            }
+                            catch (ArgumentException ae) { throw ae; }
+                            catch (ObjectDisposedException ode) { throw ode; }
+                            catch (InvalidOperationException ioe) { throw ioe; }
+                            catch (NotSupportedException nse) { throw nse; }
+                            catch (SocketException se) { throw se; }
+                        }
+                    }
+                }
+            }
+        }
+
+        #region Init producer default
 
         private void InitDefault()
         {
@@ -360,10 +439,10 @@ namespace AlyMq.Producer
 
         public Task Stop()
         {
-            if (_producer != null && !_producer.SafeHandle.IsClosed)
+            if (_server != null && !_server.SafeHandle.IsClosed)
             {
-                _producer.Dispose();
-                _producer.Close();
+                _server.Dispose();
+                _server.Close();
             }
 
             return Task.CompletedTask;

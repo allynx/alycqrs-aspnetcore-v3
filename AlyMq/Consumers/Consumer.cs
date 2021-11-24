@@ -1,13 +1,11 @@
-﻿using AlyMq.Broker;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text;
 
-namespace AlyMq.Broker
+namespace AlyMq.Consumers
 {
     [Serializable]
-    public class BrokerInfo
+    public class Consumer
     {
         public Guid Key { get; set; }
 
@@ -25,7 +23,7 @@ namespace AlyMq.Broker
 
         public override bool Equals(object obj)
         {
-            var other = obj as BrokerInfo;
+            var other = obj as Consumer;
             PulseOn = other.PulseOn;
             return obj == this ||
                 other.Key == Key &&
@@ -33,7 +31,7 @@ namespace AlyMq.Broker
                 other.Ip == Ip &&
                 other.Port == Port &&
                 other.Backlog == Backlog &&
-                other.CreateOn == CreateOn ;
+                other.CreateOn == CreateOn;
         }
 
         public override int GetHashCode()

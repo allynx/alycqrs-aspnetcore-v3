@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading.Tasks;
 
-namespace AlyMq.Consumer
+namespace AlyMq.Consumers
 {
     public interface IConsumerService
     {

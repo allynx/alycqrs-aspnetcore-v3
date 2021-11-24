@@ -1,9 +1,9 @@
-﻿using AlyMq.Broker.Configuration;
+﻿using AlyMq.Brokers.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Threading.Tasks;
 
-namespace AlyMq.Broker
+namespace AlyMq.Brokers
 {
     class Program
     {

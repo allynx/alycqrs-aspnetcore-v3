@@ -1,4 +1,4 @@
-﻿using AlyMq.Broker;
+﻿using AlyMq.Brokers;
 using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using Serilog.Events;
