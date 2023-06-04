@@ -14,7 +14,7 @@ namespace AlyCms.Rest
             {
                 string pathFormat = Path.Combine("logs", @"{Date}.log");
                 string outputTemplatePlain = @"{Timestamp:yyyy-MM-dd HH:mm:ss.fff} -{Level}-->{NewLine}{SourceContext}{NewLine}{Message:lj}{NewLine}";
-                string outputTemplateDetail = @"{Timestamp:yyyy-MM-dd HH:mm:ss.fff} -{Level}-->{NewLine}{SourceContext}{NewLine}{Properties}{NewLine}{Message:lj}{NewLine}{Exception}";
+                string outputTemplateDetail = @"{Timestamp:yyyy-MM-dd HH:mm:ss.fff} -{Level}-->{NewLine}{SourceContext}{NewLine}{Message:lj}{NewLine}{Exception}";
 
                 config.MinimumLevel.Verbose()
                     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)

@@ -14,14 +14,12 @@ namespace AlyMq.Adapters
     {
         static async Task Main(string[] args)
         {
-            using (ServiceProvider serviceProvider = new ServiceCollection().ConfigureServices().BuildServiceProvider())
-            {
-                IAdapterService service = serviceProvider.GetService<IAdapterService>();
+            using ServiceProvider serviceProvider = new ServiceCollection().ConfigureServices().BuildServiceProvider();
+            IAdapterService service = serviceProvider.GetService<IAdapterService>();
 
-                await service.Start();
+            await service.Start();
 
-                Console.Read();
-            }
+            Console.Read();
         }
     }
 

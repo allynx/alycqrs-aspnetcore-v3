@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
+using System.Text.Json;
 using System.Threading.Tasks;
 
 namespace AlyCqrs.Storage
@@ -27,24 +28,19 @@ namespace AlyCqrs.Storage
 
         public async Task<T> GetByKeyAsync(Guid aggregateKey)
         {
-            T aggregate;
 
-            if (!_memoryCache.TryGetValue<T>(aggregateKey, out aggregate))
+            if (!_memoryCache.TryGetValue<T>(aggregateKey, out T aggregate))
             {
                 Memento memento = await _storage.GetMementoAsync(aggregateKey);
-                using (var ms = new MemoryStream(memento.AggregateBinary))
-                {
-                    IFormatter iFormatter = new BinaryFormatter();
-                    aggregate= iFormatter.Deserialize(ms) as T;
-                }
+                aggregate = JsonSerializer.Deserialize<T>(memento.AggregateBinary);
 
-                IEnumerable<Event> events = await _storage.GetEventsAsync(aggregateKey,memento.Version);
+                IEnumerable<Event> events = await _storage.GetEventsAsync(aggregateKey, memento.Version);
                 foreach (Event e in events.OrderBy(o => o.Version))
                 {
                     aggregate.ReplayEvent(e);
                 }
             }
-            
+
             return aggregate;
         }
 
@@ -55,13 +51,8 @@ namespace AlyCqrs.Storage
             Queue<Event> events = aggregate.GetUnCommittedEvent();
             if (aggregate.Version % 5 == 1)
             {
-                using (var ms = new MemoryStream())
-                {
-                    IFormatter iFormatter = new BinaryFormatter();
-                    iFormatter.Serialize(ms, aggregate);
-                    byte[] buffer = ms.GetBuffer();
-                    await _storage.SaveAsync(aggregate.Id, aggregate.Version, aggregateTypeName, buffer, events);
-                }
+                byte[] buffer = JsonSerializer.SerializeToUtf8Bytes(aggregate);
+                await _storage.SaveAsync(aggregate.Id, aggregate.Version, aggregateTypeName, buffer, events);
             }
             else
             {

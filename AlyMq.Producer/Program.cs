@@ -7,16 +7,14 @@ namespace AlyMq.Producers
 {
     class Program
     {
-        static async Task Main(string[] args)
+        static async Task Main()
         {
-            using (ServiceProvider serviceProvider = new ServiceCollection().ConfigureServices().BuildServiceProvider())
-            {
-                IProducerService service = serviceProvider.GetService<IProducerService>();
+            using ServiceProvider serviceProvider = new ServiceCollection().ConfigureServices().BuildServiceProvider();
+            IProducerService service = serviceProvider.GetService<IProducerService>();
 
-                await service.Start();
+            await service.Start();
 
-                Console.Read();
-            }
+            Console.Read();
         }
 
 

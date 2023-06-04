@@ -26,11 +26,11 @@ namespace AlyCqrs.Synhronizers
 
             _sqlSugarClient.Aop.OnLogExecuting = (sql, pars) =>
             {
-                _logger.LogDebug("{0}\r\n{1}\r\n{2}", "Cqrs synhronizer sql executing logger", sql, _sqlSugarClient.Utilities.SerializeObject(pars.ToDictionary(p => p.ParameterName, p => p.Value)));
+                _logger.LogDebug("{sql}\r\n{qarameterName}\r\n{value}", "Cqrs synhronizer sql executing logger", sql, _sqlSugarClient.Utilities.SerializeObject(pars.ToDictionary(p => p.ParameterName, p => p.Value)));
             };
 
             _sqlSugarClient.Aop.OnError = (ex) => {
-                _logger.LogError(ex, "{0}\r\n{1}", "Cqrs synhronizer sql executed error logger", ex.StackTrace);
+                _logger.LogError(ex, "{msg}\r\n{trace}", "Cqrs synhronizer sql executed error logger", ex.StackTrace);
             };
         }
 

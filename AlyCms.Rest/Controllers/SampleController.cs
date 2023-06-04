@@ -121,7 +121,7 @@ namespace AlyCms.Rest.Controllers
         [HttpGet]
         public async  Task<string> TestUpdate(Guid key)
         {
-            if (key == null || key == Guid.Empty) throw new ArgumentNullException("key");
+            if (key == Guid.Empty) throw new ArgumentNullException(nameof(key));
             DateTime dtone = DateTime.Now;
 
             for (int i = 1; i < 101; i++)

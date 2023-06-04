@@ -38,19 +38,18 @@ namespace AlyCqrs.Storage
 
             _sqlSugarClient.Aop.OnLogExecuting = (sql, pars) =>
             {
-                _logger.LogDebug("{0}\r\n{1}\r\n{2}", "Event storage sql executing logger", sql, _sqlSugarClient.Utilities.SerializeObject(pars.ToDictionary(p => p.ParameterName, p => p.Value)));
+                _logger.LogDebug("{sql}\r\n{qarameterName}\r\n{value}", "Event storage sql executing logger", sql, _sqlSugarClient.Utilities.SerializeObject(pars.ToDictionary(p => p.ParameterName, p => p.Value)));
             };
 
             _sqlSugarClient.Aop.OnError = (ex) =>
             {
-                _logger.LogError(ex, "{0}\r\n{1}", "Event storage sql executed error logger", ex.StackTrace);
+                _logger.LogError(ex, "{msg}\r\n{trace}", "Event storage sql executed error logger", ex.StackTrace);
             };
         }
 
         public async Task<Memento> GetMementoAsync(Guid aggregateKey)
         {
-            Memento memento;
-            if (!_memoryCache.TryGetValue($"memento_{aggregateKey}", out memento))
+            if (!_memoryCache.TryGetValue($"memento_{aggregateKey}", out Memento memento))
             {
                 memento = await _sqlSugarClient.Queryable<Memento>().Where(m => m.AggregateKey == aggregateKey).OrderBy(m => m.Version, OrderByType.Desc).FirstAsync();
                 if (memento != null)
@@ -71,7 +70,7 @@ namespace AlyCqrs.Storage
 
         public async Task<IEnumerable<Event>> GetEventsAsync(Guid aggregateKey, int startVersion)
         {
-            List<Event> events = new List<Event>();
+            List<Event> events = new();
 
             Event evnt;
             for (int version = startVersion;
@@ -84,15 +83,12 @@ namespace AlyCqrs.Storage
             if (events.Count == 0)
             {
                 List<EventStream> eventStreams = await _sqlSugarClient.Queryable<EventStream>().Where(e => e.AggregateKey == aggregateKey && e.Version > startVersion).ToListAsync();
-                if (eventStreams != null)
-                {
-                    eventStreams.ForEach(s =>
+                eventStreams?.ForEach(s =>
                     {
                         evnt = s.GetEvent();
                         events.Add(evnt);
                         _memoryCache.Set($"event_{evnt.AggregateKey}_{evnt.Version}", evnt);
                     });
-                }
             }
 
             return events;
@@ -119,7 +115,7 @@ namespace AlyCqrs.Storage
                 string eventTypeName = type.FullName;
                 string eventJson = JsonConvert.SerializeObject(evnt);
 
-                EventStream es = new EventStream
+                EventStream es = new()
                 {
                     Id = Guid.NewGuid(),
                     AggregateKey = aggregateKey,
@@ -138,7 +134,7 @@ namespace AlyCqrs.Storage
         }
         public async Task SaveAsync(Guid aggregateKey, int aggregateVersion, string aggregateTypeName, byte[] aggregateBinary, Queue<Event> events)
         {
-            Memento memento = new Memento
+            Memento memento = new()
             {
                 Id = Guid.NewGuid(),
                 AggregateKey = aggregateKey,
@@ -158,7 +154,7 @@ namespace AlyCqrs.Storage
                 string eventTypeName = type.FullName;
                 string eventJson = JsonConvert.SerializeObject(evnt);
 
-                EventStream es = new EventStream
+                EventStream es = new()
                 {
                     Id = Guid.NewGuid(),
                     AggregateKey = aggregateKey,

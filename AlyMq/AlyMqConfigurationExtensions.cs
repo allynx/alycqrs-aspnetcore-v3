@@ -16,7 +16,7 @@ namespace AlyMq
 
             string pathFormat = Path.Combine("logs/alymq", @"{Date}.log");
             string outputTemplatePlain = @"{Timestamp:yyyy-MM-dd HH:mm:ss.fff} -{Level}-->{NewLine}{SourceContext}{NewLine}{Message:lj}{NewLine}";
-            string outputTemplateDetail = @"{Timestamp:yyyy-MM-dd HH:mm:ss.fff} -{Level}-->{NewLine}{SourceContext}{NewLine}{Properties}{NewLine}{Message:lj}{NewLine}{Exception}";
+            string outputTemplateDetail = @"{Timestamp:yyyy-MM-dd HH:mm:ss.fff} -{Level}-->{NewLine}{SourceContext}{NewLine}{Message:lj}{NewLine}{Exception}";
 
             serilogConfig.MinimumLevel.Verbose()
                     .MinimumLevel.Override("Microsoft", LogEventLevel.Warning)
@@ -26,7 +26,6 @@ namespace AlyMq
                     .WriteTo.Logger(cfg =>
                         cfg.Filter.ByIncludingOnly(m => m.Level <LogEventLevel.Warning)
                            .WriteTo.Console(LogEventLevel.Verbose, outputTemplatePlain)
-
                     )
                     .WriteTo.Logger(cfg =>
                         cfg.Filter.ByIncludingOnly(m => m.Level > LogEventLevel.Information)

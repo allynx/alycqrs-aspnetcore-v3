@@ -9,6 +9,7 @@ using System.Net.Sockets;
 using System.Runtime.Serialization;
 using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Timers;
 
@@ -35,9 +36,9 @@ namespace AlyCqrs.Events
 
         private Task ConnectProducerAsync()
         {
-            IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(CqrsProducerConfig.Instance.Ip), CqrsProducerConfig.Instance.Port);
+            IPEndPoint ipEndPoint = new(IPAddress.Parse(CqrsProducerConfig.Instance.Ip), CqrsProducerConfig.Instance.Port);
 
-            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            SocketAsyncEventArgs args = new();
             args.Completed += (s, e) => ConnectCallbackAsync(s, e);
             args.RemoteEndPoint = ipEndPoint;
 
@@ -53,7 +54,7 @@ namespace AlyCqrs.Events
             catch (NotSupportedException nse) { throw nse; }
             catch (ObjectDisposedException oe) { throw oe; }
             catch (SocketException se) { throw se; }
-            catch (Exception ex) { throw ex; }
+            catch (Exception) { throw; }
         }
 
 
@@ -61,11 +62,13 @@ namespace AlyCqrs.Events
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Producer {args.RemoteEndPoint} is connected ...");
+                _logger.LogInformation("Producer {arg} is connected ...", args.RemoteEndPoint);
 
 
-                Timer connectTimer = new Timer(30000);
-                connectTimer.Enabled = true;
+                Timer connectTimer = new(30000)
+                {
+                    Enabled = true
+                };
                 connectTimer.Elapsed += (s, e) =>
                 {
                     if (!_producer.Connected)
@@ -74,60 +77,56 @@ namespace AlyCqrs.Events
                     }
                 };
 
-                Timer sendTimer = new Timer();
-                sendTimer.Enabled = true;
+                Timer sendTimer = new()
+                {
+                    Enabled = true
+                };
                 sendTimer.Elapsed += (s, e) =>
                 {
-                    if (_eventQueue.Count > 0)
+                    if (!_eventQueue.IsEmpty)
                     {
-                        Event evnt;
-                        if (_eventQueue.TryDequeue(out evnt))
+                        if (_eventQueue.TryDequeue(out Event evnt))
                         {
-                            using (MemoryStream msBuffer = new MemoryStream())
+                            using MemoryStream msBuffer = new();
+
+                            byte[] topicKeyBuffer = CqrsTopicConfig.Instance.EventTopicKey.ToByteArray();
+                            int topicKeyLength = topicKeyBuffer.Length;
+
+                            byte[] topicTagBuffer = Encoding.UTF8.GetBytes(evnt.AggregateKey.ToString());
+                            int topicTagLength = topicTagBuffer.Length;
+
+                            byte[] bodyBuffer = JsonSerializer.SerializeToUtf8Bytes(evnt);
+                            int bodyLength = bodyBuffer.Length;
+
+                            msBuffer.Write(BitConverter.GetBytes(topicKeyLength));
+                            msBuffer.Write(BitConverter.GetBytes(topicTagLength));
+                            msBuffer.Write(BitConverter.GetBytes(bodyLength));
+                            msBuffer.Write(topicKeyBuffer);
+                            msBuffer.Write(topicTagBuffer);
+                            msBuffer.Write(bodyBuffer);
+
+                            byte[] buffer = msBuffer.GetBuffer();
+                            SocketAsyncEventArgs args = new()
                             {
-                                using (MemoryStream msBody = new MemoryStream())
-                                {
+                                AcceptSocket = _producer
+                            };
+                            args.SetBuffer(buffer, 0, buffer.Length);
 
-                                    byte[] topicKeyBuffer = CqrsTopicConfig.Instance.EventTopicKey.ToByteArray();
-                                    int topicKeyLength = topicKeyBuffer.Length;
-
-                                    byte[] topicTagBuffer = Encoding.UTF8.GetBytes(evnt.AggregateKey.ToString());
-                                    int topicTagLength = topicTagBuffer.Length;
-
-                                    IFormatter iFormatter = new BinaryFormatter();
-                                    iFormatter.Serialize(msBody, evnt);
-                                    byte[] bodyBuffer = msBody.GetBuffer();
-                                    int bodyLength = bodyBuffer.Length;
-
-                                    msBuffer.Write(BitConverter.GetBytes(topicKeyLength));
-                                    msBuffer.Write(BitConverter.GetBytes(topicTagLength));
-                                    msBuffer.Write(BitConverter.GetBytes(bodyLength));
-                                    msBuffer.Write(topicKeyBuffer);
-                                    msBuffer.Write(topicTagBuffer);
-                                    msBuffer.Write(bodyBuffer);
-
-                                    byte[] buffer = msBuffer.GetBuffer();
-                                    SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-                                    args.AcceptSocket = _producer;
-                                    args.SetBuffer(buffer, 0, buffer.Length);
-
-                                    try
-                                    {
-                                        _producer.SendAsync(args);
-                                    }
-                                    catch (NotSupportedException nse) { throw nse; }
-                                    catch (ObjectDisposedException oe) { throw oe; }
-                                    catch (SocketException se) { throw se; }
-                                    catch (Exception ex) { throw ex; }
-                                }
+                            try
+                            {
+                                _producer.SendAsync(args);
                             }
+                            catch (NotSupportedException nse) { throw nse; }
+                            catch (ObjectDisposedException oe) { throw oe; }
+                            catch (SocketException se) { throw se; }
+                            catch (Exception) { throw; }
                         }
                     }
                 };
             }
             else
             {
-                _logger.LogInformation($"Producer {args.RemoteEndPoint} connect is failed ...");
+                _logger.LogInformation("Producer {arg} connect is failed ...", args.RemoteEndPoint);
             }
             return Task.CompletedTask;
         }

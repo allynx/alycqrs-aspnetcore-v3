@@ -14,6 +14,7 @@ using System.Threading.Tasks;
 using System.Timers;
 using System.Linq;
 using AlyMq.Brokers;
+using System.Text.Json;
 
 namespace AlyMq.Consumers
 {
@@ -47,7 +48,7 @@ namespace AlyMq.Consumers
             try
             {
                 _consumer = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(ConsumerConfig.Instance.Address.Ip), ConsumerConfig.Instance.Address.Port);
+                IPEndPoint ipEndPoint = new(IPAddress.Parse(ConsumerConfig.Instance.Address.Ip), ConsumerConfig.Instance.Address.Port);
                 Listen(_consumer, ipEndPoint, ConsumerConfig.Instance.Address.Backlog);
             }
             catch (ArgumentNullException aue) { throw aue; }
@@ -59,7 +60,7 @@ namespace AlyMq.Consumers
             try
             {
                 _adapter = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(ConsumerConfig.Instance.AdapterAddress.Ip), ConsumerConfig.Instance.AdapterAddress.Port);
+                IPEndPoint ipEndPoint = new(IPAddress.Parse(ConsumerConfig.Instance.AdapterAddress.Ip), ConsumerConfig.Instance.AdapterAddress.Port);
                 Connect(_adapter, ipEndPoint);
             }
             catch (ArgumentNullException aue) { throw aue; }
@@ -72,7 +73,7 @@ namespace AlyMq.Consumers
             {
                 socket.Bind(ipEndPoint);
                 socket.Listen(backlog);
-                _logger.LogInformation($"Server is listenting on: [{ipEndPoint}] ...");
+                _logger.LogInformation("Server is listenting on {arg} ...", ipEndPoint);
 
                 Accept(socket);
 
@@ -86,7 +87,7 @@ namespace AlyMq.Consumers
 
         private void Accept(Socket socket)
         {
-            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            SocketAsyncEventArgs args = new();
             args.Completed += AcceptCallback;
             Accept(socket, args);
         }
@@ -110,7 +111,7 @@ namespace AlyMq.Consumers
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Client [{args.AcceptSocket.RemoteEndPoint}] is accepted ...");
+                _logger.LogInformation("Client {arg} is accepted ...", args.AcceptSocket.RemoteEndPoint);
 
                 _clients.Add(args.AcceptSocket);
                 Receive(args.AcceptSocket);
@@ -120,11 +121,11 @@ namespace AlyMq.Consumers
             {
                 //When the monitoring service is actively closed, a callback will be triggered here
 
-                _logger.LogInformation($"Service listenting is closed ...");
+                _logger.LogInformation("Service listenting is closed ...");
 
                 foreach (Socket client in _clients)
                 {
-                    _logger.LogInformation($"Client [{client.RemoteEndPoint}] is closed ...");
+                    _logger.LogInformation("Client {arg} is closed ...", client.RemoteEndPoint);
 
                     client.Shutdown(SocketShutdown.Both);
                     client.Dispose();
@@ -137,7 +138,7 @@ namespace AlyMq.Consumers
 
         private void Receive(Socket socket)
         {
-            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            SocketAsyncEventArgs args = new();
             args.Completed += ReceiveCallback;
             args.SetBuffer(new byte[8912], 0, 8912);
             args.UserToken = new MemoryStream();
@@ -177,7 +178,8 @@ namespace AlyMq.Consumers
             {
                 if (!socket.SafeHandle.IsClosed)
                 {
-                    _logger.LogInformation($"Client {socket.RemoteEndPoint} is closed ...");
+                    string remoteEndPoint = socket.RemoteEndPoint.ToString();
+                    _logger.LogInformation("Client {arg} is closed ...", remoteEndPoint);
 
                     _clients.Remove(socket);
 
@@ -194,7 +196,7 @@ namespace AlyMq.Consumers
         {
             try
             {
-                SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+                SocketAsyncEventArgs args = new();
                 args.Completed += ConnectCallback;
                 args.RemoteEndPoint = remoteEndPoint;
 
@@ -213,13 +215,14 @@ namespace AlyMq.Consumers
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Server [{socket.RemoteEndPoint}] is connected ...");
+                string remoteEndPoint = socket.RemoteEndPoint.ToString();
+                _logger.LogInformation("Server {arg} is connected ...", remoteEndPoint);
 
                 Receive(socket);
             }
             else
             {
-                _logger.LogInformation($"Connect to remote server is failed ...");
+                _logger.LogInformation("Connect to remote server is failed ...");
 
                 socket.Dispose();
                 socket.Close();
@@ -231,11 +234,12 @@ namespace AlyMq.Consumers
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Send to [{socket.RemoteEndPoint}] is success ...");
+                string remoteEndPoint = socket.RemoteEndPoint.ToString();
+                _logger.LogInformation("Send to {arg} is success ...", remoteEndPoint);
             }
             else
             {
-                _logger.LogInformation($"Send to remote server is failed ...");
+                _logger.LogInformation("Send to remote server is failed ...");
 
                 socket.Dispose();
                 socket.Close();
@@ -274,16 +278,10 @@ namespace AlyMq.Consumers
             byte[] brokersBuffer = new byte[brokersLength];
             memoryStream.Read(brokersBuffer, 0, brokersLength);
 
-            using (MemoryStream msBrokers = new MemoryStream(brokersBuffer))
-            {
-                IFormatter iFormatter = new BinaryFormatter();
+            HashSet<Broker> brokers = JsonSerializer.Deserialize<HashSet<Broker>>(brokersBuffer);
+            _borkers.UnionWith(brokers);
 
-                HashSet<Broker> brokers = iFormatter.Deserialize(msBrokers) as HashSet<Broker>;
-
-                _borkers.UnionWith(brokers);
-
-                _logger.LogInformation($"Consumer pull brokers by topic keys form adapter [{_adapter.RemoteEndPoint}] is success ...");
-            }
+            _logger.LogInformation("Consumer pull brokers by topic keys form adapter {arg} is success ...", _adapter.RemoteEndPoint);
 
             int offset = brokersLength + 8;//12 = Instruct of byte + brokers length of byte
 
@@ -292,7 +290,7 @@ namespace AlyMq.Consumers
 
         private void PullBrokerTimer()
         {
-            Timer timer = new Timer(30000);
+            Timer timer = new(30000);
             timer.Elapsed += (s, e) =>
             {
                 PullBroker();
@@ -304,36 +302,28 @@ namespace AlyMq.Consumers
         {
             if (_adapter != null && !_adapter.SafeHandle.IsClosed)
             {
-                using (var msBuffer = new MemoryStream())
+                using var msBuffer = new MemoryStream();
+                IEnumerable<Guid> topicKeys = _topics.Select(s => s.Key);
+                byte[] topicKeysBuffer = JsonSerializer.SerializeToUtf8Bytes(topicKeys.ToHashSet());
+
+                msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokers));
+                msBuffer.Write(BitConverter.GetBytes(topicKeysBuffer.Length));
+                msBuffer.Write(topicKeysBuffer);
+
+                byte[] buffer = msBuffer.GetBuffer();
+                SocketAsyncEventArgs args = new();
+                args.SetBuffer(buffer, 0, buffer.Length);
+
+                try
                 {
-                    using (var msTopicKeysBuffer = new MemoryStream())
-                    {
-                        IFormatter iFormatter = new BinaryFormatter();
-
-                        IEnumerable<Guid> topicKeys = _topics.Select(s => s.Key);
-                        iFormatter.Serialize(msTopicKeysBuffer, topicKeys.ToHashSet());
-                        byte[] topicKeysBuffer = msTopicKeysBuffer.GetBuffer();
-
-                        msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokers));
-                        msBuffer.Write(BitConverter.GetBytes(topicKeysBuffer.Length));
-                        msBuffer.Write(topicKeysBuffer);
-
-                        byte[] buffer = msBuffer.GetBuffer();
-                        SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-                        args.SetBuffer(buffer, 0, buffer.Length);
-
-                        try
-                        {
-                            if (_adapter.SendAsync(args)) { SendCallback(_adapter, args); }
-                            _logger.LogInformation($"Consumer create pull brokers by topic keys form adapter [{_adapter.RemoteEndPoint}] ...");
-                        }
-                        catch (ArgumentException ae) { throw ae; }
-                        catch (ObjectDisposedException ode) { throw ode; }
-                        catch (InvalidOperationException ioe) { throw ioe; }
-                        catch (NotSupportedException nse) { throw nse; }
-                        catch (SocketException se) { throw se; }
-                    }
+                    if (_adapter.SendAsync(args)) { SendCallback(_adapter, args); }
+                    _logger.LogInformation("Consumer create pull brokers by topic keys form adapter {arg} ...", _adapter.RemoteEndPoint);
                 }
+                catch (ArgumentException ae) { throw ae; }
+                catch (ObjectDisposedException ode) { throw ode; }
+                catch (InvalidOperationException ioe) { throw ioe; }
+                catch (NotSupportedException nse) { throw nse; }
+                catch (SocketException se) { throw se; }
 
             }
         }

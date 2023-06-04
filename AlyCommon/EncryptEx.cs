@@ -23,8 +23,8 @@ namespace AlyCommon
         public static string HashEncrypt(this string plainText, HashAlgorithm algorithm)
         {
             // Check arguments.
-            if (plainText == null || plainText.Length == 0) { throw new ArgumentNullException("plainText"); }
-            if (algorithm == null) { throw new ArgumentNullException("algorithm"); }
+            if (plainText == null || plainText.Length == 0) { throw new ArgumentNullException(nameof(plainText)); }
+            if (algorithm == null) { throw new ArgumentNullException(nameof(algorithm)); }
 
             byte[] unicodeBytes = Encoding.Unicode.GetBytes(plainText);
             byte[] hashBytes = algorithm.ComputeHash(unicodeBytes);
@@ -42,7 +42,7 @@ namespace AlyCommon
         {
             string imputHash = input.HashEncrypt(algorithm);
             StringComparer comparer = StringComparer.OrdinalIgnoreCase;
-            return comparer.Compare(imputHash, hash) == 0 ? true : false;
+            return comparer.Compare(imputHash, hash) == 0;
         }
 
         /// <summary>
@@ -56,7 +56,7 @@ namespace AlyCommon
         {
             // Check arguments.
             if (plainText == null || plainText.Length < 1)
-                throw new ArgumentNullException("plainText");
+                throw new ArgumentNullException(nameof(plainText));
 
             // Return the encrypted base 64 string from the memory stream.
             return plainText.AesEncrypt("allyn@live.cn");
@@ -75,7 +75,7 @@ namespace AlyCommon
         {
             // Check arguments.
             if (cipherText == null || cipherText.Length == 0)
-                throw new ArgumentNullException("cipherText");
+                throw new ArgumentNullException(nameof(cipherText));
 
             // Read the decrypted bytes from the decrypting stream and place them in expression string.
             return cipherText.AesDecrypt("allyn@live.cn");
@@ -92,9 +92,9 @@ namespace AlyCommon
         {
             // Check arguments.
             if (plainText == null || plainText.Length < 1)
-                throw new ArgumentNullException("plainText");
+                throw new ArgumentNullException(nameof(plainText));
             if (key == null || key.Length < 1)
-                throw new ArgumentNullException("Key");
+                throw new ArgumentNullException(nameof(key));
 
             // Return the encrypted base 64 string from the memory stream.
             return plainText.AesEncrypt(key, "www.allyn.com.cn");
@@ -113,9 +113,9 @@ namespace AlyCommon
         {
             // Check arguments.
             if (cipherText == null || cipherText.Length == 0)
-                throw new ArgumentNullException("cipherText");
+                throw new ArgumentNullException(nameof(cipherText));
             if (key == null || key.Length < 1)
-                throw new ArgumentNullException("Key");
+                throw new ArgumentNullException(nameof(key));
 
             // Read the decrypted bytes from the decrypting stream and place them in expression string.
             return cipherText.AesDecrypt(key, "www.allyn.com.cn");
@@ -133,36 +133,30 @@ namespace AlyCommon
         {
             // Check arguments.
             if (plainText == null || plainText.Length < 1)
-                throw new ArgumentNullException("plainText");
+                throw new ArgumentNullException(nameof(plainText));
             if (key == null || key.Length < 1)
-                throw new ArgumentNullException("Key");
+                throw new ArgumentNullException(nameof(key));
             if (iv == null || iv.Length < 1)
-                throw new ArgumentNullException("iv");
+                throw new ArgumentNullException(nameof(iv));
 
             // Create an Rijndael object with the specified key and IV.
-            using (Rijndael rijAlg = Rijndael.Create())
+            using Aes rijAlg = Aes.Create();
+            rijAlg.Key = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(key));
+            rijAlg.IV = MD5.Create().ComputeHash(Encoding.UTF8.GetBytes(iv));
+
+            // Create expression decrytor to perform the stream transform.
+            ICryptoTransform encryptor = rijAlg.CreateEncryptor(rijAlg.Key, rijAlg.IV);
+
+            // Create the streams used for encryption.
+            using MemoryStream msEncrypt = new();
+            using (CryptoStream csEncrypt = new(msEncrypt, encryptor, CryptoStreamMode.Write))
             {
-                rijAlg.Key = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(key));
-                rijAlg.IV = MD5.Create().ComputeHash(Encoding.UTF8.GetBytes(iv));
-
-                // Create expression decrytor to perform the stream transform.
-                ICryptoTransform encryptor = rijAlg.CreateEncryptor(rijAlg.Key, rijAlg.IV);
-
-                // Create the streams used for encryption.
-                using (MemoryStream msEncrypt = new MemoryStream())
-                {
-                    using (CryptoStream csEncrypt = new CryptoStream(msEncrypt, encryptor, CryptoStreamMode.Write))
-                    {
-                        using (StreamWriter swEncrypt = new StreamWriter(csEncrypt, Encoding.UTF8))
-                        {
-                            //Write all hashBytes to the stream.
-                            swEncrypt.Write(plainText);
-                        }
-                    }
-                    // Return the encrypted base 64 string from the memory stream.
-                    return Convert.ToBase64String(msEncrypt.ToArray());
-                }
+                using StreamWriter swEncrypt = new (csEncrypt, Encoding.UTF8);
+                //Write all hashBytes to the stream.
+                swEncrypt.Write(plainText);
             }
+            // Return the encrypted base 64 string from the memory stream.
+            return Convert.ToBase64String(msEncrypt.ToArray());
         }
 
         /// <summary>
@@ -178,34 +172,26 @@ namespace AlyCommon
         {
             // Check arguments.
             if (cipherText == null || cipherText.Length == 0)
-                throw new ArgumentNullException("cipherText");
+                throw new ArgumentNullException(nameof(cipherText));
             if (key == null || key.Length < 1)
-                throw new ArgumentNullException("Key");
+                throw new ArgumentNullException(nameof(key));
             if (iv == null || iv.Length < 1)
-                throw new ArgumentNullException("iv");
+                throw new ArgumentNullException(nameof(iv));
 
             // Create an Rijndael object with the specified key and IV.
-            using (Rijndael rijAlg = Rijndael.Create())
-            {
-                rijAlg.Key = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(key));
-                rijAlg.IV = MD5.Create().ComputeHash(Encoding.UTF8.GetBytes(iv));
+            using Aes rijAlg = Aes.Create();
+            rijAlg.Key = SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(key));
+            rijAlg.IV = MD5.Create().ComputeHash(Encoding.UTF8.GetBytes(iv));
 
-                // Create expression decrytor to perform the stream transform.
-                ICryptoTransform decryptor = rijAlg.CreateDecryptor(rijAlg.Key, rijAlg.IV);
+            // Create expression decrytor to perform the stream transform.
+            ICryptoTransform decryptor = rijAlg.CreateDecryptor(rijAlg.Key, rijAlg.IV);
 
-                // Create the streams used for decryption.
-                using (MemoryStream msDecrypt = new MemoryStream(Convert.FromBase64String(cipherText)))
-                {
-                    using (CryptoStream csDecrypt = new CryptoStream(msDecrypt, decryptor, CryptoStreamMode.Read))
-                    {
-                        using (StreamReader srDecrypt = new StreamReader(csDecrypt, Encoding.UTF8))
-                        {
-                            // Read the decrypted bytes from the decrypting stream and place them in expression string.
-                            return srDecrypt.ReadToEnd();
-                        }
-                    }
-                }
-            }
+            // Create the streams used for decryption.
+            using MemoryStream msDecrypt = new (Convert.FromBase64String(cipherText));
+            using CryptoStream csDecrypt = new (msDecrypt, decryptor, CryptoStreamMode.Read);
+            using StreamReader srDecrypt = new (csDecrypt, Encoding.UTF8);
+            // Read the decrypted bytes from the decrypting stream and place them in expression string.
+            return srDecrypt.ReadToEnd();
         }
     }
 }

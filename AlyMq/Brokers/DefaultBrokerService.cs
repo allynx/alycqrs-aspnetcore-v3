@@ -16,6 +16,8 @@ using System.Linq;
 using System.Security;
 using AlyMq.Producers;
 using AlyMq.Consumers;
+using System.Text.Json;
+using System.Collections;
 
 namespace AlyMq.Brokers
 {
@@ -66,31 +68,33 @@ namespace AlyMq.Brokers
             try
             {
                 _server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(BrokerConfig.Instance.Address.Ip), BrokerConfig.Instance.Address.Port);
+                IPEndPoint ipEndPoint = new(IPAddress.Parse(BrokerConfig.Instance.Address.Ip), BrokerConfig.Instance.Address.Port);
                 Listen(_server, ipEndPoint, BrokerConfig.Instance.Address.Backlog);
             }
             catch (ArgumentNullException aue) { throw aue; }
             catch (FormatException fe) { throw fe; }
         }
 
-        private void AdapterConnect() {
+        private void AdapterConnect()
+        {
             try
             {
                 _adapter = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(BrokerConfig.Instance.AdapterAddress.Ip), BrokerConfig.Instance.AdapterAddress.Port);
+                IPEndPoint ipEndPoint = new(IPAddress.Parse(BrokerConfig.Instance.AdapterAddress.Ip), BrokerConfig.Instance.AdapterAddress.Port);
                 Connect(_adapter, ipEndPoint);
             }
             catch (ArgumentNullException aue) { throw aue; }
             catch (FormatException fe) { throw fe; }
         }
 
-        private void Listen(Socket socket, IPEndPoint ipEndPoint, int backlog) {
+        private void Listen(Socket socket, IPEndPoint ipEndPoint, int backlog)
+        {
             try
             {
                 socket.Bind(ipEndPoint);
                 socket.Listen(backlog);
 
-                _logger.LogInformation($"Broker is listenting on: [{ipEndPoint}] ...");
+                _logger.LogInformation("Server is listenting on {arg} ...", ipEndPoint);
 
                 Accept(socket);
 
@@ -104,11 +108,11 @@ namespace AlyMq.Brokers
 
         private void Accept(Socket socket)
         {
-            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            SocketAsyncEventArgs args = new();
             args.Completed += AcceptCallback;
             Accept(socket, args);
 
-            _logger.LogInformation($"Async accepting is started for broker[{socket.LocalEndPoint}] ...");
+            _logger.LogInformation("Async accepting on {arg} ...", socket.LocalEndPoint);
         }
 
         private void Accept(Socket socket, SocketAsyncEventArgs args)
@@ -130,7 +134,7 @@ namespace AlyMq.Brokers
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Async accepted client[{args.AcceptSocket.RemoteEndPoint}] ...");
+                _logger.LogInformation("Async accepted client{arg} ...", args.AcceptSocket.RemoteEndPoint);
 
                 _clients.Add(args.AcceptSocket);
                 Receive(args.AcceptSocket);
@@ -140,11 +144,11 @@ namespace AlyMq.Brokers
             {
                 //When the monitoring service is actively closed, a callback will be triggered here
 
-                _logger.LogInformation($"Broker listenting is closed ...");
+                _logger.LogInformation("Broker listenting is closed ...");
 
                 foreach (Socket client in _clients)
                 {
-                    _logger.LogInformation($"Client [{client.RemoteEndPoint}] is closed ...");
+                    _logger.LogInformation("Client {arg} is closed ...", client.RemoteEndPoint);
 
                     client.Shutdown(SocketShutdown.Both);
                     client.Dispose();
@@ -157,13 +161,13 @@ namespace AlyMq.Brokers
 
         private void Receive(Socket socket)
         {
-            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            SocketAsyncEventArgs args = new();
             args.Completed += ReceiveCallback;
             args.SetBuffer(new byte[8912], 0, 8912);
             args.UserToken = new MemoryStream();
             Receive(socket, args);
 
-            _logger.LogInformation($"Async receiving is started for client[{socket.RemoteEndPoint}] ...");
+            _logger.LogInformation("Async receiving on {arg} ...", socket.RemoteEndPoint);
         }
 
         private void Receive(Socket socket, SocketAsyncEventArgs args)
@@ -199,7 +203,8 @@ namespace AlyMq.Brokers
             {
                 if (!socket.SafeHandle.IsClosed)
                 {
-                    _logger.LogInformation($"Client {socket.RemoteEndPoint} is closed ...");
+                    string remoteEndPoint = socket.RemoteEndPoint.ToString();
+                    _logger.LogInformation("Client {arg} is closed ...", remoteEndPoint);
 
                     _clients.Remove(socket);
 
@@ -218,7 +223,7 @@ namespace AlyMq.Brokers
             {
                 byte[] buffer = GetReportBrokerBuffer();
 
-                SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+                SocketAsyncEventArgs args = new();
                 args.Completed += ConnectCallback;
                 args.RemoteEndPoint = remoteEndPoint;
                 args.SetBuffer(buffer, 0, buffer.Length);
@@ -238,13 +243,14 @@ namespace AlyMq.Brokers
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Broerk is connected to remote server[{socket.RemoteEndPoint}] ...");
+                string remoteEndPoint = socket.RemoteEndPoint.ToString();
+                _logger.LogInformation("Broerk is connected to remote server {arg} ...", remoteEndPoint);
 
                 Receive(socket);
             }
             else
             {
-                _logger.LogInformation($"Broker connecting to remote server is failed ...");
+                _logger.LogInformation("Broker connecting to remote server is failed ...");
 
                 socket.Dispose();
                 socket.Close();
@@ -256,11 +262,12 @@ namespace AlyMq.Brokers
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Send to [{socket.RemoteEndPoint}] is success ...");
+                string remoteEndPoint = socket.RemoteEndPoint.ToString();
+                _logger.LogInformation("Send to {arg} is success ...", remoteEndPoint);
             }
             else
             {
-                _logger.LogInformation($"Send to remote server is failed ...");
+                _logger.LogInformation("Send to remote server is failed ...");
 
                 socket.Dispose();
                 socket.Close();
@@ -289,7 +296,8 @@ namespace AlyMq.Brokers
             }
         }
 
-        private void ApartReportProducer(Socket socket, MemoryStream memoryStream) {
+        private void ApartReportProducer(Socket socket, MemoryStream memoryStream)
+        {
             byte[] producerLengthBuffer = new byte[4];
             memoryStream.Read(producerLengthBuffer, 0, 4);
             int producerBufferLength = BitConverter.ToInt32(producerLengthBuffer);
@@ -297,24 +305,19 @@ namespace AlyMq.Brokers
             byte[] producerBuffer = new byte[producerBufferLength];
             memoryStream.Read(producerBuffer, 0, producerBufferLength);
 
-            using (MemoryStream msProducer = new MemoryStream(producerBuffer))
-            {
-                IFormatter iFormatter = new BinaryFormatter();
+            Producer producer = JsonSerializer.Deserialize<Producer>(producerBuffer);
+            _producers.Add(producer);
 
-                Producer producer = iFormatter.Deserialize(msProducer) as Producer;
-
-                _producers.Add(producer);
-
-                _logger.LogInformation($"Producer [{producer.Name} -> {producer.Ip}:{producer.Port}] is reported ...");
-            }
+            _logger.LogInformation("Producer[{name} -> {ip}:{port}] is reported ...", producer.Name, producer.Ip, producer.Port);
 
             int offset = producerBufferLength + 8;//8 = Instruct of byte + Producer length of byte
 
             ApartMessage(socket, memoryStream, offset);
         }
 
-        private void TenSecondsPoller() {
-            Timer timer = new Timer(10000);
+        private void TenSecondsPoller()
+        {
+            Timer timer = new(10000);
             timer.Elapsed += (s, e) =>
             {
                 ProducerInspecter();
@@ -325,7 +328,7 @@ namespace AlyMq.Brokers
 
         private void ThirtySecondsPoller()
         {
-            Timer timer = new Timer(30000);
+            Timer timer = new(30000);
             timer.Elapsed += (s, e) =>
             {
                 //timer.Enabled = false;
@@ -370,11 +373,12 @@ namespace AlyMq.Brokers
             });
         }
 
-        private void ReportBroker() {
+        private void ReportBroker()
+        {
 
             if (_adapter != null && !_adapter.SafeHandle.IsClosed)
             {
-                SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+                SocketAsyncEventArgs args = new();
                 byte[] buffer = GetReportBrokerBuffer();
                 args.SetBuffer(buffer, 0, buffer.Length);
 
@@ -392,35 +396,18 @@ namespace AlyMq.Brokers
 
         private byte[] GetReportBrokerBuffer()
         {
-            using (var msBuffer = new MemoryStream())
-            {
-                using (var msBroker = new MemoryStream())
-                {
-                    using (var msTopic = new MemoryStream())
-                    {
-                        IFormatter iFormatter = new BinaryFormatter();
+            _broker.PulseOn = DateTime.Now;
+            byte[] brokerBuffer = JsonSerializer.SerializeToUtf8Bytes(_broker);
+            byte[] topicBuffer = JsonSerializer.SerializeToUtf8Bytes(_topics);
 
-                        _broker.PulseOn = DateTime.Now;
+            using var msBuffer = new MemoryStream();
+            msBuffer.Write(BitConverter.GetBytes(Instruct.ReportBroker));
+            msBuffer.Write(BitConverter.GetBytes(brokerBuffer.Length));
+            msBuffer.Write(BitConverter.GetBytes(topicBuffer.Length));
+            msBuffer.Write(brokerBuffer);
+            msBuffer.Write(topicBuffer);
 
-                        iFormatter.Serialize(msBroker, _broker);
-                        byte[] brokerBuffer = msBroker.GetBuffer();
-
-                        iFormatter.Serialize(msTopic, _topics);
-                        byte[] topicBuffer = msTopic.GetBuffer();
-
-                        msBuffer.Write(BitConverter.GetBytes(Instruct.ReportBroker));
-                        msBuffer.Write(BitConverter.GetBytes(brokerBuffer.Length));
-                        msBuffer.Write(BitConverter.GetBytes(topicBuffer.Length));
-                        msBuffer.Write(brokerBuffer);
-                        msBuffer.Write(topicBuffer);
-
-                        byte[] buffer = msBuffer.GetBuffer();
-
-                        return buffer;
-                    }
-                }
-            }
-
+            return msBuffer.GetBuffer(); ;
         }
 
         #region Init broker default
@@ -433,7 +420,7 @@ namespace AlyMq.Brokers
 
             config.Bind("Topics", _topics);
 
-            _logger.LogInformation($"Broker initialized ...");
+            _logger.LogInformation("Broker initialized ...");
         }
 
         #endregion

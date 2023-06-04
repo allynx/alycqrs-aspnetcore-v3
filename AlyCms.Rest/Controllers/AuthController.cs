@@ -22,13 +22,13 @@ namespace AlyCms.Rest.Controllers
         }
 
         [HttpPost("SignIn")]
-        public async Task SignIn(object obj)
+        public async Task Login(object obj)
         {
             await Task.CompletedTask;
         }
 
         [HttpPost("SignOut")]
-        public async Task< dynamic> SignOut()
+        public async Task< dynamic> LoginOut()
         {
            await Task.CompletedTask;
            return  new { code= HttpStatusCode.OK, status=true, msg="成功" };

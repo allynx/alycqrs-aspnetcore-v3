@@ -1,5 +1,5 @@
 ﻿using AlyMq.Adapters.Configuration;
-using AlyMq.Adapters;
+using AlyMq.Brokers;
 using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
@@ -7,13 +7,10 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Runtime.Serialization;
-using System.Runtime.Serialization.Formatters.Binary;
+using System.Security;
+using System.Text.Json;
 using System.Threading.Tasks;
 using System.Timers;
-using System.Text;
-using System.Security;
-using AlyMq.Brokers;
 
 namespace AlyMq.Adapters
 {
@@ -42,7 +39,7 @@ namespace AlyMq.Adapters
             try
             {
                 _server = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                IPEndPoint ipEndPoint = new IPEndPoint(IPAddress.Parse(AdapterConfig.Instance.Address.Ip), AdapterConfig.Instance.Address.Port);
+                IPEndPoint ipEndPoint = new(IPAddress.Parse(AdapterConfig.Instance.Address.Ip), AdapterConfig.Instance.Address.Port);
                 Listen(_server, ipEndPoint, AdapterConfig.Instance.Address.Backlog);
 
             }
@@ -57,7 +54,7 @@ namespace AlyMq.Adapters
                 socket.Bind(ipEndPoint);
                 socket.Listen(backlog);
 
-                _logger.LogInformation($"Adapter is listenting on: [{ipEndPoint}] ...");
+                _logger.LogInformation("Server is listenting on {arg} ...", ipEndPoint);
 
                 Accept(socket);
             }
@@ -70,12 +67,12 @@ namespace AlyMq.Adapters
 
         private void Accept(Socket socket)
         {
-            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            SocketAsyncEventArgs args = new();
             args.Completed += AcceptCallback;
             args.SetBuffer(new byte[8912], 0, 8912);
             Accept(socket, args);
 
-            _logger.LogInformation($"Async accepting is started for adapter[{socket.LocalEndPoint}]...");
+            _logger.LogInformation("Async accepting on {arg} ...", socket.LocalEndPoint);
         }
 
         private void Accept(Socket socket, SocketAsyncEventArgs args)
@@ -97,8 +94,7 @@ namespace AlyMq.Adapters
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Async accepted client[{args.AcceptSocket.RemoteEndPoint}] ...");
-
+                _logger.LogInformation("Async accepted client {arg} ...", args.AcceptSocket.RemoteEndPoint); ;
                 _clients.Add(args.AcceptSocket);
                 Receive(args.AcceptSocket);
                 Accept(socket, args);
@@ -107,11 +103,11 @@ namespace AlyMq.Adapters
             {
                 //When the monitoring service is actively closed, a callback will be triggered here
 
-                _logger.LogInformation($"Service listenting is closed ...");
+                _logger.LogInformation("Service listenting is closed ...");
 
                 foreach (Socket client in _clients)
                 {
-                    _logger.LogInformation($"Client [{client.RemoteEndPoint}] is closed ...");
+                    _logger.LogInformation("Client {arg} is closed ...", client.RemoteEndPoint);
 
                     client.Shutdown(SocketShutdown.Both);
                     client.Dispose();
@@ -124,13 +120,13 @@ namespace AlyMq.Adapters
 
         private void Receive(Socket socket)
         {
-            SocketAsyncEventArgs args = new SocketAsyncEventArgs();
+            SocketAsyncEventArgs args = new();
             args.Completed += ReceiveCallback;
             args.SetBuffer(new byte[8912], 0, 8912);
             args.UserToken = new MemoryStream();
             Receive(socket, args);
 
-            _logger.LogInformation($"Async receiving is started for client[{socket.RemoteEndPoint}]...");
+            _logger.LogInformation("Async receiving on {arg} ...", socket.RemoteEndPoint);
         }
 
         private void Receive(Socket socket, SocketAsyncEventArgs args)
@@ -166,7 +162,8 @@ namespace AlyMq.Adapters
             {
                 if (!socket.SafeHandle.IsClosed)
                 {
-                    _logger.LogInformation($"Client {socket.RemoteEndPoint} is closed ...");
+                    string remoteEndPoint = socket.RemoteEndPoint.ToString();
+                    _logger.LogInformation("Client {arg} is closed ...", remoteEndPoint);
 
                     _clients.Remove(socket);
 
@@ -179,15 +176,15 @@ namespace AlyMq.Adapters
             }
         }
 
-        private void SendCallback(dynamic socket, SocketAsyncEventArgs args)
+        private void SendCallback(Socket socket, SocketAsyncEventArgs args)
         {
             if (args.SocketError == SocketError.Success)
             {
-                _logger.LogInformation($"Send to [{socket.RemoteEndPoint}] is success ...");
+                _logger.LogInformation("Send to {arg} is success ...", socket.RemoteEndPoint);
             }
             else
             {
-                _logger.LogInformation($"Send to remote server is failed ...");
+                _logger.LogInformation("Send to remote server is failed ...");
 
                 socket.Dispose();
                 socket.Close();
@@ -235,22 +232,15 @@ namespace AlyMq.Adapters
             byte[] topicBuffer = new byte[topicBufferLength];
             memoryStream.Read(topicBuffer, 0, topicBufferLength);
 
-            using (MemoryStream msBroker = new MemoryStream(brokerBuffer))
-            {
-                using (MemoryStream msTopic = new MemoryStream(topicBuffer))
-                {
-                    IFormatter iFormatter = new BinaryFormatter();
 
-                    Broker brokerInfo = iFormatter.Deserialize(msBroker) as Broker;
+            Broker brokerInfo = JsonSerializer.Deserialize<Broker>(brokerBuffer);
+            HashSet<Topic> topics = JsonSerializer.Deserialize<HashSet<Topic>>(topicBuffer);
 
-                    HashSet<Topic> topics = iFormatter.Deserialize(msTopic) as HashSet<Topic>;
+            _brokers.Add(brokerInfo);
+            _topics.UnionWith(topics);
 
-                    _brokers.Add(brokerInfo);
-                    _topics.UnionWith(topics);
+            _logger.LogInformation("Broker[{name}->{ip}:{port}] is reported ...", brokerInfo.Name, brokerInfo.Ip, brokerInfo.Port);
 
-                    _logger.LogInformation($"{brokerInfo.Name}->{brokerInfo.Ip}:{brokerInfo.Port} is reported ...");
-                }
-            }
 
             int offset = brokerBufferLength + topicBufferLength + 12;//12 = Instruct of byte + BrokerInfo length of byte + Topics length of byte
 
@@ -266,22 +256,13 @@ namespace AlyMq.Adapters
             byte[] topicKeysBuffer = new byte[topicKeysLength];
             memoryStream.Read(topicKeysBuffer, 0, topicKeysLength);
 
-            using (MemoryStream msTopicKeys = new MemoryStream(topicKeysBuffer))
-            {
-                IFormatter iFormatter = new BinaryFormatter();
+            IEnumerable<Guid> topicKeys = JsonSerializer.Deserialize<IEnumerable<Guid>>(topicKeysBuffer);
+            IEnumerable<Topic> topics = _topics.Where(m => topicKeys.Contains(m.Key));
+            IEnumerable<Broker> brokers = _brokers.Where(m => topics.Any(t => t.BrokerKey == m.Key));
 
-                IEnumerable<Guid> topicKeys = iFormatter.Deserialize(msTopicKeys) as IEnumerable<Guid>;
+            _logger.LogInformation("Client {arg} is pull broker by topic keys ...", socket.RemoteEndPoint);
 
-                IEnumerable<Topic> topics = _topics.Where(m => topicKeys.Contains(m.Key));
-
-                IEnumerable<Broker> brokers = _brokers.Where(m => topics.Any(t => t.BrokerKey == m.Key));
-
-                _logger.LogInformation($"Client [{socket.RemoteEndPoint}] is pull broker by topic keys ...");
-
-                ReplyPullBrokers(socket, brokers);
-
-                //_logger.LogInformation($"Client [{socket.RemoteEndPoint}] is pull topic broker ...");
-            }
+            ReplyPullBrokers(socket, brokers);
 
             int offset = topicKeysLength + 8;//12 = Instruct of byte + topicKeys length of byte
 
@@ -290,44 +271,34 @@ namespace AlyMq.Adapters
 
         private void ReplyPullBrokers(Socket socket, IEnumerable<Broker> borkers)
         {
-            using (var msBuffer = new MemoryStream())
+            using MemoryStream msBuffer = new();
+
+            byte[] brokersBuffer = JsonSerializer.SerializeToUtf8Bytes(borkers.ToHashSet());
+
+            msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokers));
+            msBuffer.Write(BitConverter.GetBytes(brokersBuffer.Length));
+            msBuffer.Write(brokersBuffer);
+
+            byte[] buffer = msBuffer.GetBuffer();
+            SocketAsyncEventArgs args = new();
+            args.SetBuffer(buffer, 0, buffer.Length);
+
+            try
             {
-                using (var msBroker = new MemoryStream())
-                {
-                    using (var msTopic = new MemoryStream())
-                    {
-                        IFormatter iFormatter = new BinaryFormatter();
+                if (socket.SendAsync(args)) { SendCallback(socket, args); }
 
-                        iFormatter.Serialize(msBroker, borkers.ToHashSet());
-                        byte[] brokersBuffer = msBroker.GetBuffer();
-
-                        msBuffer.Write(BitConverter.GetBytes(Instruct.PullBrokers));
-                        msBuffer.Write(BitConverter.GetBytes(brokersBuffer.Length));
-                        msBuffer.Write(brokersBuffer);
-
-                        byte[] buffer = msBuffer.GetBuffer();
-                        SocketAsyncEventArgs args = new SocketAsyncEventArgs();
-                        args.SetBuffer(buffer, 0, buffer.Length);
-
-                        try
-                        {
-                            if (socket.SendAsync(args)) { SendCallback(socket, args); }
-
-                            _logger.LogInformation($"Push brokers to client [{socket.RemoteEndPoint}] ...");
-                        }
-                        catch (ArgumentException ae) { throw ae; }
-                        catch (ObjectDisposedException ode) { throw ode; }
-                        catch (InvalidOperationException ioe) { throw ioe; }
-                        catch (NotSupportedException nse) { throw nse; }
-                        catch (SocketException se) { throw se; }
-                    }
-                }
+                _logger.LogInformation("Push brokers to client {arg} ...", socket.RemoteEndPoint);
             }
+            catch (ArgumentException ae) { throw ae; }
+            catch (ObjectDisposedException ode) { throw ode; }
+            catch (InvalidOperationException ioe) { throw ioe; }
+            catch (NotSupportedException nse) { throw nse; }
+            catch (SocketException se) { throw se; }
         }
 
         private void TenSecondsPoller()
         {
-            Timer timer = new Timer(10000);
+            Timer timer = new(10000);
             timer.Elapsed += (s, e) =>
             {
                 BrokerInspecter();
