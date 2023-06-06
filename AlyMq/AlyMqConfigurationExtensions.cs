@@ -12,7 +12,7 @@ namespace AlyMq
         {
             #region Serilog Configure
 
-            LoggerConfiguration serilogConfig = new LoggerConfiguration();
+            LoggerConfiguration serilogConfig = new();
 
             string pathFormat = Path.Combine("logs/alymq", @"{Date}.log");
             string outputTemplatePlain = @"{Timestamp:yyyy-MM-dd HH:mm:ss.fff} -{Level}-->{NewLine}{SourceContext}{NewLine}{Message:lj}{NewLine}";
